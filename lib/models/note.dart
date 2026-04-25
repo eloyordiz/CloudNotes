@@ -1,42 +1,55 @@
+//MODELO DART DE LA NOTA
 class Note {
-  // 1. PROPIEDADES DE LA NOTA
-  int? id; // SQLite asigna el ID automáticamente
-  String title;
-  String content;
-  DateTime createdAt;
-  bool isSynced;
+  final int? id; // id (null, ya que SQLite loa signa automáticamente)
+  final int? categoryId; // id_categoria (puede ser null si no tiene categoría)
+  final String title; // titulo
+  final String content; // contenido
+  final int color; // color (formato: 0xFFFFFFFF)
+  final DateTime createdAt; // fecha_creacion
+  final DateTime updatedAt; // fecha_modificacion
+  final bool isArchived; // esta_archivada
+  final bool isSynced; // estado_sincronizacion
 
-  // 2. CONSTRUCTOR
   Note({
     this.id,
+    this.categoryId,
     required this.title,
     required this.content,
+    this.color = 0xFFFFFFFF, // Blanco por defecto
     required this.createdAt,
-    this.isSynced = false, // POR DEFECTO NO SINCRONIZADA
-  });
+    DateTime? updatedAt,
+    this.isArchived = false,
+    this.isSynced = false,
+  }) : updatedAt =
+           updatedAt ??
+           createdAt; // Si no hay fecha de modificación, es igual a la de creación
 
-  // 3. MAPEO DEL OBJETO DART (NOTA) A SQL. ESTO ES NECESARIO PARA ESCRIBIR
+  //MAPA PARA CONVERTIR LA NOTA EN DART A SQLITE
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'categoryId': categoryId,
       'title': title,
       'content': content,
-      // SQLite NO ADMITE CAMPOS DATETIME. LO GUARDAMOS COMO TEXTO (yyyy-MM-ddTHH:mm:ss)
-      'createdAt': createdAt.toIso8601String(),
-      // SQLite NO ADMITE BOOLEANOS. LO GUARDAMOS COMO 1/0
+      'color': color,
+      'createdAt': createdAt.toIso8601String(), //FORMATO yyyy-MM-ddTHH:mm:ss
+      'updatedAt': updatedAt.toIso8601String(),
+      'isArchived': isArchived ? 1 : 0, // SQLite no tiene booleanos, usa 1 y 0
       'isSynced': isSynced ? 1 : 0,
     };
   }
 
-  // 4. MAPEO DE SQL AL OBJETO DART. ESTO ES NECESARIO PARA LEER
+  //MAPEO DE VUELTA, PARA CONVERTIR EL REGISTRO DE SQLITE A DART
   factory Note.fromMap(Map<String, dynamic> map) {
     return Note(
-      id: map['id'],
-      title: map['title'],
-      content: map['content'],
-      // PASO DEL ISO8601 AL DATETIME DE DART
-      createdAt: DateTime.parse(map['createdAt']),
-      // PASO DEL 1/0 DE SQL AL BOOLEANO DE DART
+      id: map['id'] as int?,
+      categoryId: map['categoryId'] as int?,
+      title: map['title'] as String,
+      content: map['content'] as String,
+      color: map['color'] as int,
+      createdAt: DateTime.parse(map['createdAt'] as String),
+      updatedAt: DateTime.parse(map['updatedAt'] as String),
+      isArchived: map['isArchived'] == 1,
       isSynced: map['isSynced'] == 1,
     );
   }
