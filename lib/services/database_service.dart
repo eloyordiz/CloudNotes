@@ -78,6 +78,7 @@ class DatabaseService {
     ''');
   }
 
+  // NOTAS
   // Función para insertar una nota
   Future<int> createNote(Note note) async {
     final db = await instance.database;
@@ -108,7 +109,26 @@ class DatabaseService {
     final db = await instance.database;
     return await db.delete('notes', where: 'id = ?', whereArgs: [id]);
   }
-  // FALTAN LAS ACCIONES DE CATEGORÍAS
+
+  // CATEGORÍAS
+  // Función para insertar una categoría
+  Future<NoteCategory> createCategory(NoteCategory category) async {
+    final db = await instance.database;
+    final id = await db.insert('categories', category.toMap());
+    return NoteCategory(
+      id: id,
+      name: category.name,
+      icon: category.icon,
+      isSynced: category.isSynced,
+    );
+  }
+
+  // Función para leer todas las categorías
+  Future<List<NoteCategory>> readAllCategories() async {
+    final db = await instance.database;
+    final result = await db.query('categories', orderBy: 'name ASC');
+    return result.map((json) => NoteCategory.fromMap(json)).toList();
+  }
 
   Future close() async {
     final db = await instance.database;
