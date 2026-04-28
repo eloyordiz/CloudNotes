@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/note.dart';
+import '../models/note_category.dart';
 import '../services/database_service.dart';
 import '../views/note_screen.dart';
 import '../views/category_screen.dart';
@@ -13,17 +14,28 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late List<Note> notes;
+  late List<NoteCategory> categories = [];
   bool isLoading = false;
 
-  Note? _selectedNote; // VARIABLE DE NOTA SELECCIONADA
+  // VARIABLE DE NOTA SELECCIONADA
+  Note? _selectedNote;
 
   // VARIABLE PARA SABER SI ESTAMOS CREANDO O EDITANDO
   bool _isCreating = false;
 
-  // VARIABLES DE LA NOTA: COLOR, ARCHIVADO Y CATEGORÍA
+  // VARIABLES DE LAS PROPIEDADES DE LA NOTA: COLOR, ARCHIVADO Y CATEGORÍA
   int _selectedColor = 0xFFFFFFFF; // Blanco por defecto
   bool _isArchived = false;
   int? _selectedCategoryId;
+
+  // VARIABLE DEL CONTENIDO DEL BUSCADOR
+  String _searchQuery = '';
+
+  // VARIABLE PARA FILTRAR O NO POR ARCHIVADAS
+  bool _showArchivedOnly = false;
+
+  // VARIABLE PARA FILTRAR POR CATEGORÍA CONCRETA
+  int? _activeCategoryFilter;
 
   // COLORES POSIBLES
   final List<int> _colors = [
@@ -36,9 +48,13 @@ class _HomeScreenState extends State<HomeScreen> {
     0xFFEA80FC, // Morado pastel
   ];
 
-  // CONTROLADORES DE EDITOR DE TEXTO PARA TÍTULO Y CONTENIDO
+  // CONTROLADORES DE EDITOR DE TEXTO PARA:
+  //TÍTULO
   final TextEditingController _titleController = TextEditingController();
+  //CONTENIDO
   final TextEditingController _contentController = TextEditingController();
+  //BUSCADOR
+  final TextEditingController _searchController = TextEditingController();
 
   // INICIALIZAMOS LA PRIMERA VEZ QUE ABRIMOS LA PANTALLA
   @override
@@ -52,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => isLoading = true); //CÍRUCLO DE CARGA
 
     notes = await DatabaseService.instance.readAllNotes();
+    categories = await DatabaseService.instance.readAllCategories();
 
     setState(() => isLoading = false);
   }
@@ -102,6 +119,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    //USAMOS FILTEREDNOTES PARA FILTRAR EN CASO DE QUE HAYA ALGO EN EL BUSCADOR
+    final filteredNotes = notes.where((note) {
+      //ARCHIVADO
+      if (note.isArchived != _showArchivedOnly) return false;
+
+      //CATEGORÍA
+      if (_activeCategoryFilter != null &&
+          note.categoryId != _activeCategoryFilter)
+        return false;
+
+      //BUSCADOR
+      final query = _searchQuery.toLowerCase();
+      final titleMatch = note.title.toLowerCase().contains(query);
+      final contentMatch = note.content.toLowerCase().contains(query);
+      return titleMatch || contentMatch;
+    }).toList();
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
 
@@ -140,14 +174,22 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       ListTile(
                         leading: const Icon(Icons.note_alt, color: Colors.blue),
-                        title: const Text(
+                        title: Text(
                           'Todas mis notas',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontWeight: _showArchivedOnly
+                                ? FontWeight.normal
+                                : FontWeight.bold,
+                          ),
                         ),
-                        selected: true,
+                        selected: !_showArchivedOnly,
                         selectedTileColor: Colors.blue.shade50,
                         onTap: () {
-                          // PENDIENTE: FILTRAR LISTA DE NOTAS
+                          setState(() {
+                            _showArchivedOnly = false;
+                            _activeCategoryFilter = null;
+                            _selectedNote = null;
+                          });
                         },
                       ),
 
@@ -159,6 +201,36 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           // PENDIENTE: TRAER TODAS LAS CATEGORÍAS
                           // DE MOMENTO PONEMOS SÓLO EL BOTÓN DE NAVEGAR A LA PANTALLA DE CATEGORÍAS
+                          ...categories.map((category) {
+                            final isSelected =
+                                _activeCategoryFilter == category.id;
+
+                            return ListTile(
+                              leading: Icon(
+                                Icons.label_important_outline,
+                                size: 18,
+                                color: isSelected ? Colors.blue : Colors.grey,
+                              ),
+                              title: Text(
+                                category.name,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                              selected: isSelected,
+                              selectedTileColor: Colors.blue.shade50,
+                              onTap: () {
+                                setState(() {
+                                  _activeCategoryFilter = category.id;
+                                  _showArchivedOnly = false;
+                                  _selectedNote = null;
+                                });
+                              },
+                            );
+                          }).toList(),
                           ListTile(
                             leading: const Icon(
                               Icons.settings_suggest,
@@ -175,6 +247,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   builder: (context) => const CategoryScreen(),
                                 ),
                               );
+                              refreshNotes();
                             },
                           ),
                         ],
@@ -183,9 +256,21 @@ class _HomeScreenState extends State<HomeScreen> {
                       // ARCHIVADAS
                       ListTile(
                         leading: const Icon(Icons.archive_outlined),
-                        title: const Text('Archivadas'),
+                        title: Text(
+                          'Archivadas',
+                          style: TextStyle(
+                            fontWeight: _showArchivedOnly
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                        selected: _showArchivedOnly,
                         onTap: () {
-                          // PENDIENTE: FILTRAR LISTA DE NOTAS
+                          setState(() {
+                            _showArchivedOnly = true;
+                            _activeCategoryFilter = null;
+                            _selectedNote = null;
+                          });
                         },
                       ),
                     ],
@@ -278,12 +363,28 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: const Text('Nueva nota (+)'),
                       ),
                       const SizedBox(width: 10),
-                      const Expanded(
+                      Expanded(
                         child: TextField(
-                          // PENDIENTE: FILTRAR TODAS LAS NOTAS
+                          controller: _searchController,
+                          onChanged: (value) {
+                            setState(() {
+                              _searchQuery = value;
+                            });
+                          },
                           decoration: InputDecoration(
                             hintText: 'Buscar',
                             prefixIcon: Icon(Icons.search, size: 20),
+                            suffixIcon: _searchQuery.isNotEmpty
+                                ? IconButton(
+                                    icon: Icon(Icons.clear, size: 16),
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() {
+                                        _searchQuery = '';
+                                      });
+                                    },
+                                  )
+                                : null,
                             isDense: true,
                             border: OutlineInputBorder(),
                           ),
@@ -297,17 +398,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       ? const Center(
                           child: CircularProgressIndicator(),
                         ) //INDICADOR DE PROGRESO
-                      : notes.isEmpty
-                      ? const Center(
+                      : filteredNotes.isEmpty
+                      ? Center(
                           child: Text(
-                            "No hay ninguna nota guardada. Pulse 'Nueva nota' para crear una.",
+                            _searchQuery.isEmpty
+                                ? "No hay ninguna nota guardada. Pulse 'Nueva nota' para crear una."
+                                : "No se encontraron notas con '$_searchQuery'.",
                           ),
                         )
                       : ListView.builder(
                           //LISTVIEW DE NOTAS
-                          itemCount: notes.length,
+                          itemCount: filteredNotes.length,
                           itemBuilder: (context, index) {
-                            final note = notes[index];
+                            final note = filteredNotes[index];
                             final isSelected = _selectedNote?.id == note.id;
 
                             //EL DISMISSIBLE NO TERMINA DE QUEDAR DEL TODO BIEN YA QUE APARECE EL BORDE BLANCO LATERAL MIENTRAS SE DESLIZA
@@ -464,9 +567,29 @@ class _HomeScreenState extends State<HomeScreen> {
 
                               //ARCHIVAR
                               TextButton.icon(
-                                onPressed: () {}, // PENDIENTE: ARCHIVAR
-                                icon: const Icon(Icons.archive_outlined),
-                                label: const Text('Archivar'),
+                                onPressed: () async {
+                                  if (_selectedNote != null) {
+                                    setState(() {
+                                      _isArchived = !_isArchived;
+                                    });
+                                    await _saveCurrentNote();
+                                    setState(() {
+                                      _selectedNote = null;
+                                    });
+                                  }
+                                },
+                                icon: Icon(
+                                  _isArchived
+                                      ? Icons.unarchive
+                                      : Icons.archive_outlined,
+                                  color: _isArchived ? Colors.orange : null,
+                                ),
+                                label: Text(
+                                  _isArchived ? 'Desarchivar' : 'Archivar',
+                                  style: TextStyle(
+                                    color: _isArchived ? Colors.orange : null,
+                                  ),
+                                ),
                               ),
 
                               //BORRAR
@@ -590,11 +713,57 @@ class _HomeScreenState extends State<HomeScreen> {
                                 'Categoría: ',
                                 style: TextStyle(color: Colors.grey),
                               ),
-                              ActionChip(
-                                label: const Text(
-                                  'Trabajo',
-                                ), // PENDIENTE: CARGAR CATEGORÍA REAL
-                                onPressed: () {},
+                              //POPUP PARA SELECCIONAR CATEGORÍA
+                              PopupMenuButton<int?>(
+                                initialValue: _selectedCategoryId,
+                                tooltip: 'Asignar categoría',
+                                onSelected: (int? newId) {
+                                  setState(() {
+                                    _selectedCategoryId = newId;
+                                  });
+                                },
+                                itemBuilder: (BuildContext context) {
+                                  return [
+                                    const PopupMenuItem<int?>(
+                                      value: null,
+                                      child: Text(
+                                        'Sin categoría',
+                                        style: TextStyle(
+                                          fontStyle: FontStyle.italic,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ),
+                                    ...categories.map((category) {
+                                      return PopupMenuItem<int?>(
+                                        value: category.id,
+                                        child: Text(category.name),
+                                      );
+                                    }).toList(),
+                                  ];
+                                },
+                                child: Chip(
+                                  label: Text(
+                                    _selectedCategoryId == null
+                                        ? 'Sin categoría'
+                                        : categories
+                                              .firstWhere(
+                                                (c) =>
+                                                    c.id == _selectedCategoryId,
+                                                orElse: () => NoteCategory(
+                                                  id: -1,
+                                                  name: 'Desconocida',
+                                                  icon: 'Desconocido',
+                                                ),
+                                              )
+                                              .name,
+                                  ),
+                                  avatar: const Icon(
+                                    Icons.arrow_drop_down,
+                                    size: 18,
+                                  ),
+                                  backgroundColor: Colors.white,
+                                ),
                               ),
                               const Spacer(),
                               Text(
