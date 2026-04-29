@@ -13,7 +13,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late List<Note> notes;
+  late List<Note> notes = [];
   late List<NoteCategory> categories = [];
   bool isLoading = false;
 
@@ -753,7 +753,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 orElse: () => NoteCategory(
                                                   id: -1,
                                                   name: 'Desconocida',
-                                                  icon: 'Desconocido',
+                                                  iconCodePoint: 0,
+                                                  createdAt: DateTime.now(),
                                                 ),
                                               )
                                               .name,

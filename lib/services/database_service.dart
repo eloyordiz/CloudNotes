@@ -33,17 +33,14 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 2, // <--- SUBIMOS LA VERSIÓN A 2
+      version: 3,
       onCreate: _createDB,
-      onUpgrade: _upgradeDB, // <--- AÑADIMOS ESTO
+      onUpgrade: _upgradeDB,
     );
   }
 
-  // Se ejecuta si subimos la versión de la BD
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      // Como estamos en desarrollo, borramos y empezamos de cero.
-      // En producción usaríamos comandos "ALTER TABLE".
+    if (oldVersion < 3) {
       await db.execute('DROP TABLE IF EXISTS notes');
       await db.execute('DROP TABLE IF EXISTS categories');
       await _createDB(db, newVersion);
@@ -51,17 +48,18 @@ class DatabaseService {
   }
 
   Future _createDB(Database db, int version) async {
-    // 1. Creamos la tabla de categorías primero
+    // 1. TABLA CATEGORÍAS
     await db.execute('''
       CREATE TABLE categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        icon TEXT NOT NULL,
+        iconCodePoint INTEGER NOT NULL,
+        createdAt TEXT NOT NULL,
         isSynced INTEGER NOT NULL
       )
     ''');
 
-    // 2. Creamos la tabla de notas con las nuevas columnas y la Clave Foránea
+    // 2. TABLA NOTAS
     await db.execute('''
       CREATE TABLE notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,8 +116,9 @@ class DatabaseService {
     return NoteCategory(
       id: id,
       name: category.name,
-      icon: category.icon,
+      iconCodePoint: category.iconCodePoint,
       isSynced: category.isSynced,
+      createdAt: category.createdAt,
     );
   }
 
@@ -128,6 +127,23 @@ class DatabaseService {
     final db = await instance.database;
     final result = await db.query('categories', orderBy: 'name ASC');
     return result.map((json) => NoteCategory.fromMap(json)).toList();
+  }
+
+  // Función para editar las categorías
+  Future<int> updateCategory(NoteCategory category) async {
+    final db = await instance.database;
+    return db.update(
+      'categories',
+      category.toMap(),
+      where: 'id = ?',
+      whereArgs: [category.id],
+    );
+  }
+
+  // Función para eliminar las categorías
+  Future<int> deleteCategory(int id) async {
+    final db = await instance.database;
+    return await db.delete('categories', where: 'id = ?', whereArgs: [id]);
   }
 
   Future close() async {
