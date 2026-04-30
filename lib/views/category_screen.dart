@@ -11,6 +11,8 @@ class CategoryScreen extends StatefulWidget {
 
 class _CategoryScreenState extends State<CategoryScreen> {
   List<NoteCategory> categories = [];
+  Map<int, int> categoryNoteCounts =
+      {}; //DICCIONARIO DE RECUENTO DE NOTAS POR CATEGORÍA
   bool isLoading = false;
 
   // VARIABLES DEL BUSCADOR
@@ -18,7 +20,24 @@ class _CategoryScreenState extends State<CategoryScreen> {
   final TextEditingController _searchController = TextEditingController();
 
   // LISTA DE ICONOS POSIBLES PARA ELEGIR (AMPLIAR)
-  final List<IconData> _availableIcons = [Icons.folder, Icons.work, Icons.home];
+  final List<IconData> _availableIcons = [
+    Icons.folder,
+    Icons.work,
+    Icons.home,
+    Icons.shopping_cart,
+    Icons.school,
+    Icons.favorite,
+    Icons.star,
+    Icons.lightbulb,
+    Icons.flight,
+    Icons.directions_car,
+    Icons.fitness_center,
+    Icons.restaurant,
+    Icons.account_balance,
+    Icons.pets,
+    Icons.music_note,
+    Icons.camera_alt,
+  ];
 
   // INICIALIZAMOS LA PRIMERA VEZ QUE ABRIMOS LA PANTALLA
   @override
@@ -32,6 +51,16 @@ class _CategoryScreenState extends State<CategoryScreen> {
     setState(() => isLoading = true); // CÍRCULO DE CARGA
 
     categories = await DatabaseService.instance.readAllCategories();
+    //RECUENTO DE NOTAS POR CATEGORÍA
+    categoryNoteCounts.clear();
+    for (var category in categories) {
+      if (category.id != null) {
+        final count = await DatabaseService.instance.countNotesInCategory(
+          category.id!,
+        );
+        categoryNoteCounts[category.id!] = count;
+      }
+    }
 
     setState(() => isLoading = false);
   }
@@ -210,7 +239,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
                         leading: const Icon(Icons.note_alt, color: Colors.grey),
                         title: const Text('Todas mis notas'),
                         onTap: () {
-                          Navigator.pop(context);
+                          Navigator.pop(
+                            context,
+                            false,
+                          ); //PARÁMETRO = VER ARCHIVADAS ?
                         },
                       ),
 
@@ -236,7 +268,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
                         onTap: () {
                           Navigator.pop(
                             context,
-                          ); // PENDIENTE: PASAR PARÁMETRO PARA ABRIR ARCHIVADAS DIRECTAMENTE
+                            true, //PARÁMETRO = VER ARCHIVADAS ?
+                          );
                         },
                       ),
                     ],
@@ -364,9 +397,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
                             itemCount: filteredCategories.length,
                             itemBuilder: (context, index) {
                               final category = filteredCategories[index];
-
-                              // PENDIENTE: PONER EL NÚMERO REAL DE NOTAS
-                              final noteCount = 0;
+                              final noteCount =
+                                  categoryNoteCounts[category.id] ?? 0;
 
                               return Card(
                                 color: Colors.white,
@@ -456,11 +488,52 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                             ),
                                           ),
 
-                                          // BOTÓN ELIMINAR
+                                          // BOTÓN ELIMINAR CON CONFIRMACIÓN
                                           OutlinedButton.icon(
                                             onPressed: () async {
-                                              // PENDIENTE: NOTIFICACIÓN DE CONFIRMAR ANTES DE BORRAR
-                                              if (category.id != null) {
+                                              // DIÁLOGO DE CONFIRMACIÓN
+                                              final confirm = await showDialog<bool>(
+                                                context: context,
+                                                builder: (context) => AlertDialog(
+                                                  title: const Text(
+                                                    'Eliminar categoría',
+                                                  ),
+                                                  content: Text(
+                                                    '¿Estás seguro de que deseas eliminar la categoría "${category.name}"?\n\nLas notas que pertenezcan a esta categoría no se borrarán, pero se quedarán sin categoría asignada.',
+                                                  ),
+                                                  actions: [
+                                                    // BOTÓN CANCELAR: DEVUELVE FALSE
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                            context,
+                                                            false,
+                                                          ),
+                                                      child: const Text(
+                                                        'Cancelar',
+                                                      ),
+                                                    ),
+                                                    // BOTÓN ELIMINAR: DEVUELVE TRUE
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                            context,
+                                                            true,
+                                                          ),
+                                                      style:
+                                                          TextButton.styleFrom(
+                                                            foregroundColor:
+                                                                Colors.red,
+                                                          ),
+                                                      child: const Text(
+                                                        'Eliminar',
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                              if (confirm == true &&
+                                                  category.id != null) {
                                                 await DatabaseService.instance
                                                     .deleteCategory(
                                                       category.id!,

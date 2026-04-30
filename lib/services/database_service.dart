@@ -146,6 +146,18 @@ class DatabaseService {
     return await db.delete('categories', where: 'id = ?', whereArgs: [id]);
   }
 
+  // Función para contar cuántas notas pertenecen a una categoría
+  Future<int> countNotesInCategory(int categoryId) async {
+    final db = await instance.database;
+    // QUERY SQL
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) FROM notes WHERE categoryId = ?',
+      [categoryId],
+    );
+    // Extraemos el número del resultado (o devolvemos 0 si algo falla)
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
   Future close() async {
     final db = await instance.database;
     db.close();

@@ -199,8 +199,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         title: const Text('Categorías'),
                         childrenPadding: const EdgeInsets.only(left: 16),
                         children: [
-                          // PENDIENTE: TRAER TODAS LAS CATEGORÍAS
-                          // DE MOMENTO PONEMOS SÓLO EL BOTÓN DE NAVEGAR A LA PANTALLA DE CATEGORÍAS
                           ...categories.map((category) {
                             final isSelected =
                                 _activeCategoryFilter == category.id;
@@ -240,13 +238,31 @@ class _HomeScreenState extends State<HomeScreen> {
                               'Editar categorías',
                               style: TextStyle(fontSize: 14),
                             ),
-                            onTap: () {
-                              Navigator.push(
+                            onTap: () async {
+                              //NAVEGAMOS ESPERANDO EL RESULTADO, QUE SERÁ SI VOLVEMOS
+                              //MARCANDO ARCHIVADAS (TRUE) O TODAS MIS NOTAS (FALSE)
+                              final result = await Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => const CategoryScreen(),
                                 ),
                               );
+
+                              if (result != null) {
+                                setState(() {
+                                  //RESULT = TRUE: ARCHIVADADS
+                                  if (result == true) {
+                                    _showArchivedOnly = true;
+                                    _activeCategoryFilter = null;
+                                    _selectedNote = null;
+                                    //RESULT = FALSE: TODAS
+                                  } else if (result == false) {
+                                    _showArchivedOnly = false;
+                                    _activeCategoryFilter = null;
+                                    _selectedNote = null;
+                                  }
+                                });
+                              }
                               refreshNotes();
                             },
                           ),
