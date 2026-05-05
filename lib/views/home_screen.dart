@@ -120,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     // VARIABLE PARA SABER SI ESTAMOS EN UN MÓVIL O DESKTOP
-    // PONEMOS EL BREAKPOINT EN 800 DE ANCHO
+    // PONEMOS EL BREAKPOINT EN 1000 DE ANCHO
     final bool isMobile = MediaQuery.of(context).size.width < 1000;
 
     //USAMOS FILTEREDNOTES PARA FILTRAR EN CASO DE QUE HAYA ALGO EN EL BUSCADOR
@@ -336,14 +336,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
 
-      appBar: isMobile
-          ? AppBar(
-              title: const Text('CloudNotes'),
-              actions: [
-                IconButton(onPressed: () {}, icon: const Icon(Icons.search)),
-              ],
-            )
-          : null,
+      appBar: isMobile ? AppBar(title: const Text('CloudNotes')) : null,
       drawer: isMobile ? Drawer(child: widgetMenuLateral) : null,
       /* DIVIDIMOS LA PANTALLA EN 3 COLUMNAS, DE IZQUIERDA A DERECHA:
       - MENÚ LATERAL: ANCHO FIJO, CONTINENE LOGO, ACCIONES Y SINCRONIZACIÓN

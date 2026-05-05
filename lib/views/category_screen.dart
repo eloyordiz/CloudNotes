@@ -15,6 +15,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
       {}; //DICCIONARIO DE RECUENTO DE NOTAS POR CATEGORÍA
   bool isLoading = false;
 
+  // VARIABLE DE CATEGORÍA SELECCIONADA
+  NoteCategory? _selectedCategory;
+  bool _isCreating = false;
+
+  // CONTROLADORES PARA EL FORMULARIO
+  final TextEditingController _nameController = TextEditingController();
+  IconData? _selectedIcon;
+
   // VARIABLES DEL BUSCADOR
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
@@ -202,13 +210,137 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // VARIABLE PARA SABER SI ESTAMOS EN UN MÓVIL O DESKTOP
+    // PONEMOS EL BREAKPOINT EN 1000 DE ANCHO
+    final bool isMobile = MediaQuery.of(context).size.width < 1000;
+
     // FILTRO DEL BUSCADOR
     final filteredCategories = categories.where((cat) {
       return cat.name.toLowerCase().contains(_searchQuery.toLowerCase());
     }).toList();
 
+    //GUARDAMOS MENÚ LATERAL EN UNA VARIABLE PARA PODER REUTILIZAR CÓDIGO EN MOVIL Y DESKTOP
+    /* MENÚ LATERAL. LO DIVIDIMOS EN:
+        - LOGO DE LA APP
+        - SECCIÓN SUPERIOR: TODAS LAS NOTAS, CATEGORÍAS, Y ARCHIVADAS
+        - SINCRONIZACIÓN
+        - USUARIO
+    */
+    final widgetMenuLateral = Container(
+      width: 250,
+      color: const Color(0xFFE3F2FD),
+      child: Column(
+        children: [
+          const SizedBox(height: 40),
+          const Text(
+            'LOGO DE LA APP',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 20),
+
+          // SECCIÓN SUPERIOR
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                // TODAS LAS NOTAS
+                ListTile(
+                  leading: const Icon(Icons.note_alt, color: Colors.grey),
+                  title: const Text('Todas mis notas'),
+                  onTap: () {
+                    if (isMobile) Navigator.pop(context);
+                    Navigator.pop(
+                      context,
+                      false,
+                    ); //PARÁMETRO = VER ARCHIVADAS ?
+                  },
+                ),
+
+                // CATEGORÍAS
+                ListTile(
+                  leading: const Icon(Icons.folder, color: Colors.blue),
+                  title: const Text(
+                    'Categorías',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  selected: true,
+                  selectedTileColor: Colors.blue.shade50,
+                  onTap: () {},
+                ),
+
+                // ARCHIVADAS
+                ListTile(
+                  leading: const Icon(
+                    Icons.archive_outlined,
+                    color: Colors.grey,
+                  ),
+                  title: const Text('Archivadas'),
+                  onTap: () {
+                    if (isMobile) Navigator.pop(context);
+                    Navigator.pop(
+                      context,
+                      true, //PARÁMETRO = VER ARCHIVADAS ?
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          // SINCRONIZACIÓN
+          // PENDIENTE:
+          //   MOSTRAR CORRECTAMENTE EL ESTADO DE SINCRONIZACIÓN
+          //   MOSTRAR CORRECTAMENTE LA HORA DE ÚLTIMA ACTUALIZACIÓN
+          //   CONFIGURAR PARA QUE, AL HACER CLICK, SE FUERCE LA SINCRONIZACIÓN CON NUBE
+          Container(
+            color: Colors.green.shade50,
+            child: ListTile(
+              leading: const Icon(Icons.cloud_done, color: Colors.green),
+              title: const Text(
+                'Sincronizado',
+                style: TextStyle(
+                  color: Colors.green,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              subtitle: const Text(
+                'Última sincronización: hace 4 min.',
+                style: TextStyle(color: Colors.green, fontSize: 12),
+              ),
+              onTap: () {},
+            ),
+          ),
+
+          const Divider(height: 1),
+
+          // USUARIO
+          ListTile(
+            leading: const CircleAvatar(
+              radius: 16,
+              backgroundColor: Colors.blueAccent,
+              child: Icon(Icons.person, color: Colors.white, size: 18),
+            ),
+            title: const Text(
+              'Eloy Ordiz Lera',
+              style: TextStyle(fontSize: 14),
+            ),
+            subtitle: const Text(
+              'eloyordizl@gmail.com',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
+
+      appBar: isMobile ? AppBar(title: const Text('CloudNotes')) : null,
+      drawer: isMobile ? Drawer(child: widgetMenuLateral) : null,
 
       /* DIVIDIMOS LA PANTALLA EN 2 COLUMNAS, DE IZQUIERDA A DERECHA:
       - MENÚ LATERAL: ANCHO FIJO, CONTINENE LOGO Y NAVEGACIÓN
@@ -217,86 +349,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
       body: Row(
         children: [
           // 1. MENÚ LATERAL
-          Container(
-            width: 250,
-            color: const Color(0xFFE3F2FD),
-            child: Column(
-              children: [
-                const SizedBox(height: 40),
-                const Text(
-                  'LOGO DE LA APP',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 20),
-
-                // SECCIÓN SUPERIOR
-                Expanded(
-                  child: ListView(
-                    padding: EdgeInsets.zero,
-                    children: [
-                      // TODAS LAS NOTAS
-                      ListTile(
-                        leading: const Icon(Icons.note_alt, color: Colors.grey),
-                        title: const Text('Todas mis notas'),
-                        onTap: () {
-                          Navigator.pop(
-                            context,
-                            false,
-                          ); //PARÁMETRO = VER ARCHIVADAS ?
-                        },
-                      ),
-
-                      // CATEGORÍAS
-                      ListTile(
-                        leading: const Icon(Icons.folder, color: Colors.blue),
-                        title: const Text(
-                          'Categorías',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        selected: true,
-                        selectedTileColor: Colors.blue.shade50,
-                        onTap: () {},
-                      ),
-
-                      // ARCHIVADAS
-                      ListTile(
-                        leading: const Icon(
-                          Icons.archive_outlined,
-                          color: Colors.grey,
-                        ),
-                        title: const Text('Archivadas'),
-                        onTap: () {
-                          Navigator.pop(
-                            context,
-                            true, //PARÁMETRO = VER ARCHIVADAS ?
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-
-                // USUARIO
-                ListTile(
-                  leading: const CircleAvatar(
-                    radius: 16,
-                    backgroundColor: Colors.blueAccent,
-                    child: Icon(Icons.person, color: Colors.white, size: 18),
-                  ),
-                  title: const Text(
-                    'Eloy Ordiz Lera',
-                    style: TextStyle(fontSize: 14),
-                  ),
-                  subtitle: const Text(
-                    'eloyordizl@gmail.com',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
+          if (!isMobile) widgetMenuLateral,
 
           // 2. GESTIÓN DE CATEGORÍAS
           Expanded(
@@ -306,29 +359,25 @@ class _CategoryScreenState extends State<CategoryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // PARTE SUPERIOR: TÍTULO, BUSCADOR Y BOTÓN CREAR
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      //TÍTULO
-                      const Text(
-                        'Gestión de Categorías',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      //BUSCADOR
-                      Row(
-                        children: [
-                          // BUSCADOR DE CATEGORÍAS
-                          SizedBox(
-                            width: 250,
-                            child: TextField(
+                  isMobile
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Categorías',
+                              style: TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            // BUSCADOR EN MÓVIL (Ocupa todo el ancho)
+                            TextField(
                               controller: _searchController,
                               onChanged: (val) =>
                                   setState(() => _searchQuery = val),
                               decoration: InputDecoration(
-                                hintText: 'Buscar',
+                                hintText: 'Buscar categoría...',
                                 prefixIcon: const Icon(Icons.search, size: 20),
                                 filled: true,
                                 fillColor: Colors.white,
@@ -347,29 +396,80 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 16),
-
-                          //BOTÓN NUEVA CATEGORÍA
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.shade700,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 16,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                          ],
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            //TÍTULO
+                            const Text(
+                              'Categorías',
+                              style: TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                            onPressed: () => _showCategoryDialog(),
-                            child: const Text('Crear Nueva Categoría (+)'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                            //BUSCADOR Y BOTÓN (+)
+                            Row(
+                              children: [
+                                // BUSCADOR DE CATEGORÍAS
+                                SizedBox(
+                                  width: 250,
+                                  child: TextField(
+                                    controller: _searchController,
+                                    onChanged: (val) =>
+                                        setState(() => _searchQuery = val),
+                                    decoration: InputDecoration(
+                                      hintText: 'Buscar',
+                                      prefixIcon: const Icon(
+                                        Icons.search,
+                                        size: 20,
+                                      ),
+                                      filled: true,
+                                      fillColor: Colors.white,
+                                      isDense: true,
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey.shade300,
+                                        ),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey.shade300,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+
+                                //BOTÓN NUEVA CATEGORÍA
+                                if (!isMobile) ...[
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.blue.shade700,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 16,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    onPressed: () => _showCategoryDialog(),
+                                    child: const Text(
+                                      'Crear Nueva Categoría (+)',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
                   const SizedBox(height: 30),
                   const Text(
                     'Todas las Categorías',
@@ -389,7 +489,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                             // MAX CROSS AXIS EXTENT PERMITE QUE EL NÚMERO DE COLUMNAS SE ADAPTE AL ANCHO DE LA PANTALLA
                             gridDelegate:
                                 const SliverGridDelegateWithMaxCrossAxisExtent(
-                                  maxCrossAxisExtent: 350,
+                                  maxCrossAxisExtent: 520,
                                   mainAxisExtent: 140,
                                   crossAxisSpacing: 20,
                                   mainAxisSpacing: 20,
@@ -586,6 +686,16 @@ class _CategoryScreenState extends State<CategoryScreen> {
           ),
         ],
       ),
+
+      //BOTÓN FLOTANTE PARA CREAR NUEVA CATEGORÍA EN MÓVIL
+      floatingActionButton: isMobile
+          ? FloatingActionButton(
+              onPressed: () => _showCategoryDialog(),
+              backgroundColor: Colors.blue.shade700,
+              foregroundColor: Colors.white,
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 }
