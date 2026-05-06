@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/note.dart';
+import '../models/note_category.dart';
 import '../services/database_service.dart';
 
 class NoteScreen extends StatefulWidget {
@@ -31,6 +32,9 @@ class _NoteScreenState extends State<NoteScreen> {
     0xFFEA80FC, // Morado pastel
   ];
 
+  // VARIABLES PARA LA CATEGORÍA
+  List<NoteCategory> categories = [];
+
   @override
   void initState() {
     super.initState();
@@ -43,6 +47,22 @@ class _NoteScreenState extends State<NoteScreen> {
       _isArchived = widget.note!.isArchived;
       _selectedCategoryId = widget.note!.categoryId;
     }
+
+    _loadCategories();
+  }
+
+  // FUNCIÓN PARA CARGAR CATEGORÍAS
+  Future<void> _loadCategories() async {
+    final loadedCategories = await DatabaseService.instance.readAllCategories();
+    setState(() {
+      categories = loadedCategories;
+
+      // COMPROBACIÓN DE QUE LA NOTA NO TIENE UNA CATEGORÍA BORRADA
+      if (_selectedCategoryId != null &&
+          !categories.any((cat) => cat.id == _selectedCategoryId)) {
+        _selectedCategoryId = null;
+      }
+    });
   }
 
   @override
@@ -106,6 +126,42 @@ class _NoteScreenState extends State<NoteScreen> {
         elevation: 0,
         title: Text(widget.note != null ? 'Editar Nota' : 'Nueva Nota'),
         actions: [
+          // BOTÓN DE ELIMINAR (SOLO SI LA NOTA YA EXISTE)
+          if (widget.note != null)
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              tooltip: 'Eliminar nota',
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('¿Eliminar nota?'),
+                    content: const Text(
+                      'Esta acción no se puede deshacer y la nota desaparecerá para siempre.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancelar'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.red,
+                        ),
+                        child: const Text('Eliminar'),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (confirm == true) {
+                  await DatabaseService.instance.deleteNote(widget.note!.id!);
+                  if (mounted) Navigator.pop(context, true);
+                }
+              },
+            ),
+
           // BOTÓN DE ARCHIVAR
           IconButton(
             icon: Icon(
@@ -192,6 +248,71 @@ class _NoteScreenState extends State<NoteScreen> {
             ),
           ),
           const SizedBox(height: 10),
+          // PIE DE PÁGINA
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16.0,
+              vertical: 12.0,
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.folder_outlined, size: 20, color: Colors.grey),
+                const SizedBox(width: 8),
+
+                // DESPLEGABLE DE CATEGORÍAS
+                Expanded(
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int?>(
+                      value: _selectedCategoryId,
+                      isExpanded: true,
+                      hint: const Text(
+                        'Sin categoría',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                      icon: const Icon(
+                        Icons.arrow_drop_down,
+                        color: Colors.grey,
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text(
+                            'Sin categoría',
+                            style: TextStyle(fontStyle: FontStyle.italic),
+                          ),
+                        ),
+                        ...categories.map((cat) {
+                          return DropdownMenuItem<int?>(
+                            value: cat.id,
+                            child: Text(
+                              cat.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
+                      ],
+                      onChanged: (int? newValue) {
+                        setState(() {
+                          _selectedCategoryId = newValue;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+
+                // FECHA DE ÚLTIMA MODIFICACIÓN
+                if (widget.note != null) ...[
+                  const SizedBox(width: 10),
+                  Text(
+                    'Mod: ${widget.note!.updatedAt.day}/${widget.note!.updatedAt.month} ${widget.note!.updatedAt.hour.toString().padLeft(2, '0')}:${widget.note!.updatedAt.minute.toString().padLeft(2, '0')}',
+                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );

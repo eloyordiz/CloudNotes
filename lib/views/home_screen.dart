@@ -70,6 +70,12 @@ class _HomeScreenState extends State<HomeScreen> {
     notes = await DatabaseService.instance.readAllNotes();
     categories = await DatabaseService.instance.readAllCategories();
 
+    // COMPROBACIÓN DE QUE LA NOTA NO TIENE UNA CATEGORÍA BORRADA
+    if (_selectedCategoryId != null &&
+        !categories.any((cat) => cat.id == _selectedCategoryId)) {
+      _selectedCategoryId = null;
+    }
+
     setState(() => isLoading = false);
   }
 
