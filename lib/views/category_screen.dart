@@ -1,6 +1,8 @@
+import 'package:cloud_notes/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import '../models/note_category.dart';
 import '../services/database_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class CategoryScreen extends StatefulWidget {
   const CategoryScreen({super.key});
@@ -14,6 +16,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
   Map<int, int> categoryNoteCounts =
       {}; //DICCIONARIO DE RECUENTO DE NOTAS POR CATEGORÍA
   bool isLoading = false;
+
+  // VARIABLE DEL USUARIO QUE ESTÁ LOGGEADO
+  // LA SACAMOS TANTO AQUÍ COMO DENTRO DEL BUILD PARA QUE SE CARGUE AL INICIO Y DINÁMICAMENTE
+  final uid = FirebaseAuth.instance.currentUser?.uid;
 
   // VARIABLE DE CATEGORÍA SELECCIONADA
   NoteCategory? _selectedCategory;
@@ -58,7 +64,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   Future refreshCategories() async {
     setState(() => isLoading = true); // CÍRCULO DE CARGA
 
-    categories = await DatabaseService.instance.readAllCategories();
+    categories = await DatabaseService.instance.readAllCategories(uid ?? '');
     //RECUENTO DE NOTAS POR CATEGORÍA
     categoryNoteCounts.clear();
     for (var category in categories) {
@@ -175,6 +181,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       // ACTUALIZAR CATEGORÍA EN LA BD
                       final updatedCategory = NoteCategory(
                         id: categoryToEdit.id,
+                        userId: uid ?? '',
                         name: nameController.text,
                         iconCodePoint: selectedIconCode,
                         createdAt: categoryToEdit.createdAt,
@@ -186,6 +193,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                     } else {
                       // CREAR NUEVA CATEGORÍA EN LA BD
                       final newCategory = NoteCategory(
+                        userId: uid ?? '',
                         name: nameController.text,
                         iconCodePoint: selectedIconCode,
                         createdAt: DateTime.now(),
@@ -210,6 +218,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // VARIABLE DEL USUARIO QUE ESTÁ LOGGEADO
+    final currentUser = FirebaseAuth.instance.currentUser;
+
     // VARIABLE PARA SABER SI ESTAMOS EN UN MÓVIL O DESKTOP
     // PONEMOS EL BREAKPOINT EN 1000 DE ANCHO
     final bool isMobile = MediaQuery.of(context).size.width < 1000;
@@ -322,13 +333,39 @@ class _CategoryScreenState extends State<CategoryScreen> {
               backgroundColor: Colors.blueAccent,
               child: Icon(Icons.person, color: Colors.white, size: 18),
             ),
-            title: const Text(
-              'Eloy Ordiz Lera',
-              style: TextStyle(fontSize: 14),
+            title: Text(
+              currentUser?.displayName ?? 'Usuario',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
             ),
-            subtitle: const Text(
-              'eloyordizl@gmail.com',
+            subtitle: Text(
+              currentUser?.email ?? 'Email',
               style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+
+          // BOTÓN DE CERRAR SESIÓN
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: () async {
+                await AuthService().signOut();
+              },
+              icon: const Icon(Icons.logout, size: 18, color: Colors.black87),
+              label: const Text(
+                'Cerrar sesión',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              style: TextButton.styleFrom(
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 16),

@@ -33,14 +33,14 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 3) {
+    if (oldVersion < 4) {
       await db.execute('DROP TABLE IF EXISTS notes');
       await db.execute('DROP TABLE IF EXISTS categories');
       await _createDB(db, newVersion);
@@ -52,6 +52,7 @@ class DatabaseService {
     await db.execute('''
       CREATE TABLE categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId STRING NOT NULL,
         name TEXT NOT NULL,
         iconCodePoint INTEGER NOT NULL,
         createdAt TEXT NOT NULL,
@@ -63,6 +64,7 @@ class DatabaseService {
     await db.execute('''
       CREATE TABLE notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId STRING NOT NULL,
         categoryId INTEGER,
         title TEXT NOT NULL,
         content TEXT NOT NULL,
@@ -83,10 +85,15 @@ class DatabaseService {
     return await db.insert('notes', note.toMap());
   }
 
-  // Función para leer todas las notas
-  Future<List<Note>> readAllNotes() async {
+  // Función para leer todas las notas - AÑADIDO FILTRO POR USUARIO
+  Future<List<Note>> readAllNotes(String userId) async {
     final db = await instance.database;
-    final result = await db.query('notes', orderBy: 'createdAt DESC');
+    final result = await db.query(
+      'notes',
+      where: 'userId = ?',
+      whereArgs: [userId],
+      orderBy: 'createdAt DESC',
+    );
 
     return result.map((json) => Note.fromMap(json)).toList();
   }
@@ -115,6 +122,7 @@ class DatabaseService {
     final id = await db.insert('categories', category.toMap());
     return NoteCategory(
       id: id,
+      userId: category.userId,
       name: category.name,
       iconCodePoint: category.iconCodePoint,
       isSynced: category.isSynced,
@@ -123,9 +131,14 @@ class DatabaseService {
   }
 
   // Función para leer todas las categorías
-  Future<List<NoteCategory>> readAllCategories() async {
+  Future<List<NoteCategory>> readAllCategories(String userId) async {
     final db = await instance.database;
-    final result = await db.query('categories', orderBy: 'name ASC');
+    final result = await db.query(
+      'categories',
+      where: 'userId = ?',
+      whereArgs: [userId],
+      orderBy: 'name ASC',
+    );
     return result.map((json) => NoteCategory.fromMap(json)).toList();
   }
 

@@ -1,9 +1,11 @@
+import 'package:cloud_notes/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../models/note_category.dart';
 import '../services/database_service.dart';
 import '../views/note_screen.dart';
 import '../views/category_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -16,6 +18,10 @@ class _HomeScreenState extends State<HomeScreen> {
   late List<Note> notes = [];
   late List<NoteCategory> categories = [];
   bool isLoading = false;
+
+  // VARIABLE DEL USUARIO QUE ESTÁ LOGGEADO
+  // LA SACAMOS TANTO AQUÍ COMO DENTRO DEL BUILD PARA QUE SE CARGUE AL INICIO Y DINÁMICAMENTE
+  final uid = FirebaseAuth.instance.currentUser?.uid;
 
   // VARIABLE DE NOTA SELECCIONADA
   Note? _selectedNote;
@@ -67,8 +73,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future refreshNotes() async {
     setState(() => isLoading = true); //CÍRUCLO DE CARGA
 
-    notes = await DatabaseService.instance.readAllNotes();
-    categories = await DatabaseService.instance.readAllCategories();
+    notes = await DatabaseService.instance.readAllNotes(uid ?? '');
+    categories = await DatabaseService.instance.readAllCategories(uid ?? '');
 
     // COMPROBACIÓN DE QUE LA NOTA NO TIENE UNA CATEGORÍA BORRADA
     if (_selectedCategoryId != null &&
@@ -88,6 +94,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // ACTUALIZAR NOTA
       final updatedNote = Note(
         id: _selectedNote!.id,
+        userId: uid ?? '',
         categoryId: _selectedCategoryId,
         title: _titleController.text.isEmpty
             ? 'Sin título'
@@ -104,6 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // CREAR NOTA NUEVA
       final newNote = Note(
         categoryId: _selectedCategoryId,
+        userId: uid ?? '',
         title: _titleController.text.isEmpty
             ? 'Sin título'
             : _titleController.text,
@@ -125,6 +133,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // VARIABLE DEL USUARIO QUE ESTÁ LOGGEADO
+    final currentUser = FirebaseAuth.instance.currentUser;
+
     // VARIABLE PARA SABER SI ESTAMOS EN UN MÓVIL O DESKTOP
     // PONEMOS EL BREAKPOINT EN 1000 DE ANCHO
     final bool isMobile = MediaQuery.of(context).size.width < 1000;
@@ -325,13 +336,39 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: Colors.blueAccent,
               child: Icon(Icons.person, color: Colors.white, size: 18),
             ),
-            title: const Text(
-              'Eloy Ordiz Lera',
-              style: TextStyle(fontSize: 14),
+            title: Text(
+              currentUser?.displayName ?? 'Usuario',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
             ),
-            subtitle: const Text(
-              'eloyordizl@gmail.com',
+            subtitle: Text(
+              currentUser?.email ?? 'Email',
               style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+
+          // BOTÓN DE CERRAR SESIÓN
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: () async {
+                await AuthService().signOut();
+              },
+              icon: const Icon(Icons.logout, size: 18, color: Colors.black87),
+              label: const Text(
+                'Cerrar sesión',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              style: TextButton.styleFrom(
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -841,6 +878,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                       _selectedCategoryId,
                                                   orElse: () => NoteCategory(
                                                     id: -1,
+                                                    userId: uid ?? '',
                                                     name: 'Desconocida',
                                                     iconCodePoint: 0,
                                                     createdAt: DateTime.now(),

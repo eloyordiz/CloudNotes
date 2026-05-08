@@ -1,6 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart';
+
 //MODELO DART DE LA NOTA
 class Note {
   final int? id; // id (null, ya que SQLite loa signa automáticamente)
+  final String
+  userId; // id usuario (revisar, creo que firestore lo guarda como texto pero no estoy seguro)
   final int? categoryId; // id_categoria (puede ser null si no tiene categoría)
   final String title; // titulo
   final String content; // contenido
@@ -12,6 +16,7 @@ class Note {
 
   Note({
     this.id,
+    required this.userId,
     this.categoryId,
     required this.title,
     required this.content,
@@ -28,6 +33,7 @@ class Note {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'userId': userId,
       'categoryId': categoryId,
       'title': title,
       'content': content,
@@ -43,6 +49,7 @@ class Note {
   factory Note.fromMap(Map<String, dynamic> map) {
     return Note(
       id: map['id'] as int?,
+      userId: map['userId'] ?? '',
       categoryId: map['categoryId'] as int?,
       title: map['title'] as String,
       content: map['content'] as String,

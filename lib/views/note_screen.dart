@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../models/note_category.dart';
 import '../services/database_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class NoteScreen extends StatefulWidget {
   final Note? note;
@@ -15,6 +16,9 @@ class NoteScreen extends StatefulWidget {
 class _NoteScreenState extends State<NoteScreen> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _contentController = TextEditingController();
+  // VARIABLE DEL USUARIO QUE ESTÁ LOGGEADO
+  // LA SACAMOS TANTO AQUÍ COMO DENTRO DEL BUILD PARA QUE SE CARGUE AL INICIO Y DINÁMICAMENTE
+  final uid = FirebaseAuth.instance.currentUser?.uid;
 
   // VARIABLES DE LA NOTA: COLOR, ARCHIVADO Y CATEGORÍA
   int _selectedColor = 0xFFFFFFFF; // Blanco por defecto
@@ -53,7 +57,9 @@ class _NoteScreenState extends State<NoteScreen> {
 
   // FUNCIÓN PARA CARGAR CATEGORÍAS
   Future<void> _loadCategories() async {
-    final loadedCategories = await DatabaseService.instance.readAllCategories();
+    final loadedCategories = await DatabaseService.instance.readAllCategories(
+      uid ?? '',
+    );
     setState(() {
       categories = loadedCategories;
 
@@ -82,6 +88,7 @@ class _NoteScreenState extends State<NoteScreen> {
       // ACTUALIZAR NOTA CON NUEVOS VALORES
       final updatedNote = Note(
         id: widget.note!.id,
+        userId: uid ?? '',
         categoryId: _selectedCategoryId,
         title: _titleController.text.isEmpty
             ? 'Sin título'
@@ -98,6 +105,7 @@ class _NoteScreenState extends State<NoteScreen> {
       // CREAR NOTA
       final newNote = Note(
         categoryId: _selectedCategoryId,
+        userId: uid ?? '',
         title: _titleController.text.isEmpty
             ? 'Sin título'
             : _titleController.text,
