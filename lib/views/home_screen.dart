@@ -1,4 +1,5 @@
 import 'package:cloud_notes/services/auth_service.dart';
+import 'package:cloud_notes/services/firestore_service.dart';
 import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../models/note_category.dart';
@@ -43,6 +44,9 @@ class _HomeScreenState extends State<HomeScreen> {
   // VARIABLE PARA FILTRAR POR CATEGORÍA CONCRETA
   int? _activeCategoryFilter;
 
+  // VARIABLE PARA GUARDAR CUÁNDO FUE LA ÚLTIMA SINCRONIZACIÓN
+  DateTime? _lastSyncTime;
+
   // COLORES POSIBLES
   final List<int> _colors = [
     0xFFFFFFFF, // Blanco
@@ -66,7 +70,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    refreshNotes(); // LEEMOS TODAS LAS NOTAS DE LA BD
+    refreshNotes(); // LEEMOS TODAS LAS NOTAS DE LA BD LOCAL
+    _syncWithCloud(); // CARGAMOS LAS NOTAS DE LA BD NUBE
   }
 
   // FUNCIÓN PARA LEER LA BD
@@ -121,14 +126,64 @@ class _HomeScreenState extends State<HomeScreen> {
         isArchived: _isArchived,
         isSynced: false,
       );
-      await DatabaseService.instance.createNote(newNote);
-      setState(() => _isCreating = false); // Salimos del modo creación
+      // GUARDAMOS EN BD LOCAL Y CAPTURAMOS ID
+      final int generatedId = await DatabaseService.instance.createNote(
+        newNote,
+      );
+      // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
+      final Note notaConId = newNote.copyWith(id: generatedId);
+      // GUARDAMOS LA COPIA EN LA NUBE
+      await FirestoreService().saveNoteToCloud(notaConId);
+      setState(() => _isCreating = false);
     }
 
-    refreshNotes(); // Refrescamos la lista central
+    refreshNotes();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Nota guardada correctamente')),
     );
+  }
+
+  // FUNCIÓN PARA CARGAR LOS DATOS DE LA NUBE A LA BD LOCAL
+  Future<void> _restoreFromCloud() async {
+    setState(() => isLoading = true);
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    FirestoreService firestore = FirestoreService();
+    List<Note> cloudNotes = await firestore.getNotesFromCloud(uid);
+
+    for (var note in cloudNotes) {
+      // PENDIENTE: COMPROBAR SI LA NOTA YA EXISTE PARA SOBREESCRIBIRLA
+      await DatabaseService.instance.createNote(note);
+    }
+    refreshNotes();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Se han restaurado ${cloudNotes.length} notas.')),
+    );
+  }
+
+  // FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA
+  Future<void> _syncWithCloud() async {
+    if (uid == null) return;
+
+    try {
+      List<Note> cloudNotes = await FirestoreService().getNotesFromCloud(uid!);
+
+      // ACTUALZIAMOS BD LOCAL
+      for (var note in cloudNotes) {
+        await DatabaseService.instance.createNote(note);
+      }
+
+      // ACTUALIZAMOS VARIABLE DE ÚLTIMA SINCRONIZACIÓN
+      if (mounted) {
+        setState(() {
+          _lastSyncTime = DateTime.now();
+        });
+        refreshNotes();
+      }
+    } catch (e) {
+      print("Error en auto-sync: $e");
+    }
   }
 
   @override
@@ -319,11 +374,28 @@ class _HomeScreenState extends State<HomeScreen> {
                   fontSize: 14,
                 ),
               ),
-              subtitle: const Text(
-                'Última sincronización: hace 4 min.',
-                style: TextStyle(color: Colors.green, fontSize: 12),
+              subtitle: Text(
+                _lastSyncTime == null
+                    ? 'Sincronizando con la nube...'
+                    : 'Última vez: ${_lastSyncTime!}',
+                style: const TextStyle(color: Colors.green, fontSize: 12),
               ),
-              onTap: () {},
+              onTap: () async {
+                final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                // OBTENEMOS NOTAS LOCALES
+                List<Note> localNotes = await DatabaseService.instance
+                    .readAllNotes(uid);
+
+                // SUBIMOS LAS NOTAS MEDIANTE UN BUCLE FOR
+                FirestoreService firestore = FirestoreService();
+                for (var note in localNotes) {
+                  await firestore.saveNoteToCloud(note);
+                }
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('¡Sincronización completada!')),
+                );
+              },
             ),
           ),
 
@@ -610,9 +682,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (!isMobile)
             Expanded(
               child: Container(
-                color: _selectedNote == null && !_isCreating
-                    ? Colors.white
-                    : Color(_selectedColor),
+                color: Colors.white,
                 child: _selectedNote == null && !_isCreating
                     ? const Center(
                         child: Text(
@@ -741,7 +811,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
                           // CUERPO DEL EDITOR: CONTENIDO DE NOTE_SCREEN,
                           Expanded(
-                            child: Padding(
+                            child: Container(
+                              color: Color(_selectedColor),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 40,
                                 vertical: 20,
@@ -915,6 +986,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       floatingActionButton: isMobile
           ? FloatingActionButton(
+              heroTag:
+                  'homeNewNote', // EL HERO TAG SIRVE PARA EVITAR PROBLEMAS AL NAVEGAR ENTRE PANTALLAS CON DISTINTOS BOTONES FLOTANTES
               onPressed: () {
                 // BOTÓN FLOTANTE PARA CREAR NUEVA NOTA EN MÓVIL
                 Navigator.push(

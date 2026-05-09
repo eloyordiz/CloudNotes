@@ -60,4 +60,20 @@ class Note {
       isSynced: map['isSynced'] == 1,
     );
   }
+
+  // FUNCIÓN PARA CREAR UNA NOTA NUEVA, CAMBIÁNDOLE EL ID
+  Note copyWith({int? id}) {
+    return Note(
+      id: id ?? this.id,
+      userId: userId,
+      categoryId: categoryId,
+      title: title,
+      content: content,
+      color: color,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      isArchived: isArchived,
+      isSynced: isSynced,
+    );
+  }
 }

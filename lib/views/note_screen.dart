@@ -3,6 +3,7 @@ import '../models/note.dart';
 import '../models/note_category.dart';
 import '../services/database_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_notes/services/firestore_service.dart';
 
 class NoteScreen extends StatefulWidget {
   final Note? note;
@@ -115,7 +116,14 @@ class _NoteScreenState extends State<NoteScreen> {
         isArchived: _isArchived,
         isSynced: false,
       );
-      await DatabaseService.instance.createNote(newNote);
+      // GUARDAMOS EN BD LOCAL Y CAPTURAMOS ID
+      final int generatedId = await DatabaseService.instance.createNote(
+        newNote,
+      );
+      // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
+      final Note notaConId = newNote.copyWith(id: generatedId);
+      // GUARDAMOS LA COPIA EN LA NUBE
+      await FirestoreService().saveNoteToCloud(notaConId);
     }
 
     if (mounted) {
@@ -126,11 +134,10 @@ class _NoteScreenState extends State<NoteScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // FONDO DEPENDIENTE DEL COLOR SELECCIONADO
-      backgroundColor: Color(_selectedColor),
+      // FONDO BLANCO EN SCAFFOLD Y APPBAR
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor:
-            Colors.transparent, // BARRA TRANSPARENTE PARA VER EL FONDO
+        backgroundColor: Colors.white,
         elevation: 0,
         title: Text(widget.note != null ? 'Editar Nota' : 'Nueva Nota'),
         actions: [
@@ -190,7 +197,8 @@ class _NoteScreenState extends State<NoteScreen> {
       body: Column(
         children: [
           Expanded(
-            child: Padding(
+            child: Container(
+              color: Color(_selectedColor),
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 children: [
@@ -223,6 +231,7 @@ class _NoteScreenState extends State<NoteScreen> {
           // BARRA INFERIOR DE COLORES
           Container(
             height: 60,
+            color: Color(_selectedColor),
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
@@ -255,10 +264,11 @@ class _NoteScreenState extends State<NoteScreen> {
               },
             ),
           ),
-          const SizedBox(height: 10),
+          Container(height: 10, color: Color(_selectedColor)),
           // PIE DE PÁGINA
           const Divider(height: 1),
-          Padding(
+          Container(
+            color: Colors.grey.shade50,
             padding: const EdgeInsets.symmetric(
               horizontal: 16.0,
               vertical: 12.0,

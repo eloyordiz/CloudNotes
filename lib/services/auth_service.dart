@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'database_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -33,6 +34,9 @@ class AuthService {
 
   // LOGOUT
   Future<void> signOut() async {
+    // BORRAMOS BD LOCAL
+    await DatabaseService.instance.clearLocalData();
+    // CERRAMOS SESIÓN
     await _auth.signOut();
   }
 

@@ -44,4 +44,16 @@ class NoteCategory {
       isSynced: map['isSynced'] == 1,
     );
   }
+
+  // FUNCIÓN PARA CREAR UNA CATEGORÍA NUEVA, CAMBIÁNDOLE EL ID
+  NoteCategory copyWith({int? id}) {
+    return NoteCategory(
+      id: id ?? this.id,
+      userId: userId,
+      name: name,
+      iconCodePoint: iconCodePoint,
+      createdAt: createdAt,
+      isSynced: isSynced,
+    );
+  }
 }

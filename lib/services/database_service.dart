@@ -82,7 +82,13 @@ class DatabaseService {
   // Función para insertar una nota
   Future<int> createNote(Note note) async {
     final db = await instance.database;
-    return await db.insert('notes', note.toMap());
+    return await db.insert(
+      'notes',
+      note.toMap(),
+      // SI INTENTAMOS CARGAR LAS NOTAS DE LA NUBE EN LOCAL, PUEDE HABER LAS MISMAS NOTAS CON ID REPETIDOS
+      // CONFLICT ALGORITHM EVITA ESTOS ERRORES AL CARGAR DATOS DE LA BD NUBE EN LA BD LOCAL SOBREESCRIBIENDO LAS NOTAS
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   // Función para leer todas las notas - AÑADIDO FILTRO POR USUARIO
@@ -117,16 +123,14 @@ class DatabaseService {
 
   // CATEGORÍAS
   // Función para insertar una categoría
-  Future<NoteCategory> createCategory(NoteCategory category) async {
+  Future<int> createCategory(NoteCategory category) async {
     final db = await instance.database;
-    final id = await db.insert('categories', category.toMap());
-    return NoteCategory(
-      id: id,
-      userId: category.userId,
-      name: category.name,
-      iconCodePoint: category.iconCodePoint,
-      isSynced: category.isSynced,
-      createdAt: category.createdAt,
+    return await db.insert(
+      'categories',
+      category.toMap(),
+      // SI INTENTAMOS CARGAR LAS CATEGORÍAS DE LA NUBE EN LOCAL, PUEDE HABER LAS MISMAS CATEGORÍAS CON ID REPETIDOS
+      // CONFLICT ALGORITHM EVITA ESTOS ERRORES AL CARGAR DATOS DE LA BD NUBE EN LA BD LOCAL SOBRESCRIBIENDO LAS CATEGORÁIS
+      conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
@@ -174,5 +178,13 @@ class DatabaseService {
   Future close() async {
     final db = await instance.database;
     db.close();
+  }
+
+  // FUNCIÓN PARA BORRAR LA BD LOCAL (SOLO USADO AL CERRAR SESIÓN)
+  Future<void> clearLocalData() async {
+    final db = await instance.database;
+    await db.delete('notes');
+    await db.delete('categories');
+    print("Base de datos local limpiada con éxito");
   }
 }

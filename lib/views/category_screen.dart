@@ -1,4 +1,5 @@
 import 'package:cloud_notes/services/auth_service.dart';
+import 'package:cloud_notes/services/firestore_service.dart';
 import 'package:flutter/material.dart';
 import '../models/note_category.dart';
 import '../services/database_service.dart';
@@ -198,8 +199,17 @@ class _CategoryScreenState extends State<CategoryScreen> {
                         iconCodePoint: selectedIconCode,
                         createdAt: DateTime.now(),
                       );
-                      await DatabaseService.instance.createCategory(
-                        newCategory,
+
+                      // GUARDAMOS EN BD LOCAL Y CAPTURAMOS ID
+                      final int generatedId = await DatabaseService.instance
+                          .createCategory(newCategory);
+                      // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
+                      final NoteCategory categoriaConId = newCategory.copyWith(
+                        id: generatedId,
+                      );
+                      // GUARDAMOS LA COPIA EN LA NUBE
+                      await FirestoreService().saveCategoryToCloud(
+                        categoriaConId,
                       );
                     }
 
@@ -727,6 +737,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
       //BOTÓN FLOTANTE PARA CREAR NUEVA CATEGORÍA EN MÓVIL
       floatingActionButton: isMobile
           ? FloatingActionButton(
+              heroTag: 'catNewCategory',
               onPressed: () => _showCategoryDialog(),
               backgroundColor: Colors.blue.shade700,
               foregroundColor: Colors.white,
