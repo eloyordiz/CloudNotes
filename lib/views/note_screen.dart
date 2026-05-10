@@ -103,8 +103,24 @@ class _NoteScreenState extends State<NoteScreen> {
       );
       // EN BD LOCAL
       await DatabaseService.instance.updateNote(updatedNote);
-      // EN LA NUBE
-      await FirestoreService().saveNoteToCloud(updatedNote);
+
+      // INTENTAMOS GUARDAR EN LA NUBE
+      try {
+        // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
+        final Note notaConId = updatedNote.copyWith(isSynced: true);
+        // GUARDAMOS LA COPIA EN LA NUBE
+        await FirestoreService().saveNoteToCloud(notaConId);
+
+        // SI SALE BIEN (NO HA SALTADO EL CATCH AQUÍ AÚN), SOBREESCRIBIMOS CON ISSYNCED = TRUE
+        await DatabaseService.instance.updateNote(notaConId);
+      } catch (e) {
+        print("Guardado offline: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sin conexión. Cambios guardados en local.'),
+          ),
+        );
+      }
     } else {
       // CREAR NOTA
       final newNote = Note(
@@ -123,6 +139,26 @@ class _NoteScreenState extends State<NoteScreen> {
       final int generatedId = await DatabaseService.instance.createNote(
         newNote,
       );
+
+      // INTENTAMOS GUARDAR EN LA NUBE
+      try {
+        // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
+        final Note notaConId = newNote.copyWith(
+          id: generatedId,
+          isSynced: true,
+        );
+        // GUARDAMOS LA COPIA EN LA NUBE
+        await FirestoreService().saveNoteToCloud(notaConId);
+
+        // SI SALE BIEN (NO HA SALTADO EL CATCH AQUÍ AÚN), SOBREESCRIBIMOS CON ISSYNCED = TRUE
+        await DatabaseService.instance.updateNote(notaConId);
+      } catch (e) {
+        print("Guardado offline: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sin conexión. Guardada en local.')),
+        );
+      }
+
       // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
       final Note notaConId = newNote.copyWith(id: generatedId);
       // GUARDAMOS LA COPIA EN LA NUBE

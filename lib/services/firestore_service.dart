@@ -14,10 +14,13 @@ class FirestoreService {
           .doc(note.userId)
           .collection('notes')
           .doc(note.id.toString())
-          .set(note.toMap());
+          .set(note.toMap())
+          // EL TIMEOUT EVITA QUE EL PROCESO SE QUEDE EN COLA DE FORMA INDEFINIDA SIN CONEXION
+          .timeout(const Duration(seconds: 3));
       print("Nota sincronizada en la nube: ${note.title}");
     } catch (e) {
       print("Error al subir a Firestore: $e");
+      rethrow;
     }
   }
 
@@ -29,9 +32,12 @@ class FirestoreService {
           .doc(userId)
           .collection('notes')
           .doc(noteId.toString())
-          .delete();
+          .delete()
+          // EL TIMEOUT EVITA QUE EL PROCESO SE QUEDE EN COLA DE FORMA INDEFINIDA SIN CONEXION
+          .timeout(const Duration(seconds: 3));
     } catch (e) {
       print("Error al borrar de Firestore: $e");
+      rethrow;
     }
   }
 
@@ -62,10 +68,13 @@ class FirestoreService {
           .doc(category.userId)
           .collection('categories')
           .doc(category.id.toString())
-          .set(category.toMap());
+          .set(category.toMap())
+          // EL TIMEOUT EVITA QUE EL PROCESO SE QUEDE EN COLA DE FORMA INDEFINIDA SIN CONEXION
+          .timeout(const Duration(seconds: 3));
       print("Categoría sincronizada en la nube: ${category.name}");
     } catch (e) {
       print("Error al subir a Firestore: $e");
+      rethrow;
     }
   }
 
@@ -77,9 +86,12 @@ class FirestoreService {
           .doc(userId)
           .collection('categories')
           .doc(noteId.toString())
-          .delete();
+          .delete()
+          // EL TIMEOUT EVITA QUE EL PROCESO SE QUEDE EN COLA DE FORMA INDEFINIDA SIN CONEXION
+          .timeout(const Duration(seconds: 3));
     } catch (e) {
       print("Error al borrar de Firestore: $e");
+      rethrow;
     }
   }
 

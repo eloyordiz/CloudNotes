@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_notes/services/auth_service.dart';
 import 'package:cloud_notes/services/firestore_service.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +9,7 @@ import '../services/database_service.dart';
 import '../views/note_screen.dart';
 import '../views/category_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -66,12 +69,61 @@ class _HomeScreenState extends State<HomeScreen> {
   //BUSCADOR
   final TextEditingController _searchController = TextEditingController();
 
+  //VARIABLE PARA CONEXIÓN EN TIEMPO REAL CON BD NUBE
+  StreamSubscription? _notesSubscription;
+
   // INICIALIZAMOS LA PRIMERA VEZ QUE ABRIMOS LA PANTALLA
   @override
   void initState() {
     super.initState();
     refreshNotes(); // LEEMOS TODAS LAS NOTAS DE LA BD LOCAL
-    _syncWithCloud(); // CARGAMOS LAS NOTAS DE LA BD NUBE
+    _setupRealtimeSync(); // CARGAMOS LAS NOTAS DE LA BD NUBE
+  }
+
+  // Y CERRAMOS TODO CUANDO SE SALE DE LA APP
+  @override
+  void dispose() {
+    _notesSubscription?.cancel();
+    super.dispose();
+  }
+
+  // FUNCION PARA SINCRONIZACIÓN EN TIEMPOR EAL
+  void _setupRealtimeSync() {
+    if (uid == null) return;
+
+    _notesSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('notes')
+        .snapshots() // ESTO DETECTA LOS CAMBIOS EN TIEMPO REAL
+        .listen((snapshot) async {
+          bool huboCambios = false;
+
+          // TRAEMOS SOLO LOS DOCUMENTOS EDITADOS, CREADOS O BORRADOS
+          for (var change in snapshot.docChanges) {
+            //SI ESTAMOS CREANDO O EDITANDO
+            if (change.type == DocumentChangeType.added ||
+                change.type == DocumentChangeType.modified) {
+              Note notaDeLaNube = Note.fromMap(change.doc.data()!);
+
+              // LA GUARDAMOS EN LA BD LOCAL
+              await DatabaseService.instance.createNote(notaDeLaNube);
+              huboCambios = true;
+            } else if (change.type == DocumentChangeType.removed) {
+              // SI ESTAMOS ELIMINANDO
+              int? noteId = change.doc.data()?['id'];
+              if (noteId != null) {
+                await DatabaseService.instance.deleteNote(noteId);
+                huboCambios = true;
+              }
+            }
+          }
+
+          // SI HUBO CAMBIOS, REFRESCAMOS
+          if (huboCambios && mounted) {
+            refreshNotes();
+          }
+        });
   }
 
   // FUNCIÓN PARA LEER LA BD
@@ -91,7 +143,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // FUNCIÓN PARA GUARDAR UNA NOTA, DEPENDIENDO DE SI CREAS O EDITAR
-  // PENDIENTE: CAMBIAR EL ESTADO ISSYNCED UNA VEZ SE HA COMPLETADO LA SINCRONIZACIÓN, TANTO AL CREAR COMO AL EDITAR
   Future<void> _saveCurrentNote() async {
     if (_titleController.text.isEmpty && _contentController.text.isEmpty)
       return;
@@ -114,8 +165,23 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       // EDITAMOS EN BD LOCAL
       await DatabaseService.instance.updateNote(updatedNote);
-      // GUARDAMOS LA COPIA EN LA NUBE
-      await FirestoreService().saveNoteToCloud(updatedNote);
+      // INTENTAMOS GUARDAR EN LA NUBE
+      try {
+        // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
+        final Note notaConId = updatedNote.copyWith(isSynced: true);
+        // GUARDAMOS LA COPIA EN LA NUBE
+        await FirestoreService().saveNoteToCloud(notaConId);
+
+        // SI SALE BIEN (NO HA SALTADO EL CATCH AQUÍ AÚN), SOBREESCRIBIMOS CON ISSYNCED = TRUE
+        await DatabaseService.instance.updateNote(notaConId);
+      } catch (e) {
+        print("Guardado offline: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sin conexión. Cambios guardados en local.'),
+          ),
+        );
+      }
     } else {
       // CREAR NOTA NUEVA
       final newNote = Note(
@@ -134,11 +200,25 @@ class _HomeScreenState extends State<HomeScreen> {
       final int generatedId = await DatabaseService.instance.createNote(
         newNote,
       );
-      // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
-      final Note notaConId = newNote.copyWith(id: generatedId);
-      // GUARDAMOS LA COPIA EN LA NUBE
-      await FirestoreService().saveNoteToCloud(notaConId);
-      setState(() => _isCreating = false);
+      // INTENTAMOS GUARDAR EN LA NUBE
+      try {
+        // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
+        final Note notaConId = newNote.copyWith(
+          id: generatedId,
+          isSynced: true,
+        );
+        // GUARDAMOS LA COPIA EN LA NUBE
+        await FirestoreService().saveNoteToCloud(notaConId);
+
+        // SI SALE BIEN (NO HA SALTADO EL CATCH AQUÍ AÚN), SOBREESCRIBIMOS CON ISSYNCED = TRUE
+        await DatabaseService.instance.updateNote(notaConId);
+        setState(() => _isCreating = false);
+      } catch (e) {
+        print("Guardado offline: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sin conexión. Guardada en local.')),
+        );
+      }
     }
 
     refreshNotes();
@@ -239,8 +319,8 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _lastSyncTime = DateTime.now();
         });
-        refreshNotes();
       }
+      refreshNotes();
     } catch (e) {
       print("Error en auto-sync: $e");
     }

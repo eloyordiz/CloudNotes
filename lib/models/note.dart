@@ -13,6 +13,7 @@ class Note {
   final DateTime updatedAt; // fecha_modificacion
   final bool isArchived; // esta_archivada
   final bool isSynced; // estado_sincronizacion
+  final bool isDeleted; //estado_eliminado
 
   Note({
     this.id,
@@ -25,6 +26,7 @@ class Note {
     DateTime? updatedAt,
     this.isArchived = false,
     this.isSynced = false,
+    this.isDeleted = false,
   }) : updatedAt =
            updatedAt ??
            createdAt; // Si no hay fecha de modificación, es igual a la de creación
@@ -42,6 +44,7 @@ class Note {
       'updatedAt': updatedAt.toIso8601String(),
       'isArchived': isArchived ? 1 : 0, // SQLite no tiene booleanos, usa 1 y 0
       'isSynced': isSynced ? 1 : 0,
+      'isDeleted': isDeleted ? 1 : 0,
     };
   }
 
@@ -58,6 +61,7 @@ class Note {
       updatedAt: DateTime.parse(map['updatedAt'] as String),
       isArchived: map['isArchived'] == 1,
       isSynced: map['isSynced'] == 1,
+      isDeleted: map['isDeleted'] == 1,
     );
   }
 

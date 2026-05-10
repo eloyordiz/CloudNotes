@@ -192,10 +192,30 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       await DatabaseService.instance.updateCategory(
                         updatedCategory,
                       );
-                      // EN LA NUBE
-                      await FirestoreService().saveCategoryToCloud(
-                        updatedCategory,
-                      );
+                      // INTENTAMOS GUARDAR EN LA NUBE
+                      try {
+                        // CREAMOS LA COPIA DE LA CATEGORIA PARA LA NUBE
+                        final NoteCategory categoriaConId = updatedCategory
+                            .copyWith(isSynced: true);
+                        // GUARDAMOS LA COPIA EN LA NUBE
+                        await FirestoreService().saveCategoryToCloud(
+                          categoriaConId,
+                        );
+
+                        // SI SALE BIEN (NO HA SALTADO EL CATCH AQUÍ AÚN), SOBREESCRIBIMOS CON ISSYNCED = TRUE
+                        await DatabaseService.instance.updateCategory(
+                          categoriaConId,
+                        );
+                      } catch (e) {
+                        print("Guardado offline: $e");
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Sin conexión. Cambios guardados en local.',
+                            ),
+                          ),
+                        );
+                      }
                     } else {
                       // CREAR NUEVA CATEGORÍA EN LA BD
                       final newCategory = NoteCategory(
@@ -208,14 +228,29 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       // GUARDAMOS EN BD LOCAL Y CAPTURAMOS ID
                       final int generatedId = await DatabaseService.instance
                           .createCategory(newCategory);
-                      // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
-                      final NoteCategory categoriaConId = newCategory.copyWith(
-                        id: generatedId,
-                      );
-                      // GUARDAMOS LA COPIA EN LA NUBE
-                      await FirestoreService().saveCategoryToCloud(
-                        categoriaConId,
-                      );
+                      // INTENTAMOS GUARDAR EN LA NUBE
+                      try {
+                        // CREAMOS LA COPIA DE LA NOTA PARA LA NUBE
+                        final NoteCategory categoriaConId = newCategory
+                            .copyWith(id: generatedId, isSynced: true);
+                        // GUARDAMOS LA COPIA EN LA NUBE
+                        await FirestoreService().saveCategoryToCloud(
+                          categoriaConId,
+                        );
+
+                        // SI SALE BIEN (NO HA SALTADO EL CATCH AQUÍ AÚN), SOBREESCRIBIMOS CON ISSYNCED = TRUE
+                        await DatabaseService.instance.updateCategory(
+                          categoriaConId,
+                        );
+                        setState(() => _isCreating = false);
+                      } catch (e) {
+                        print("Guardado offline: $e");
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Sin conexión. Guardada en local.'),
+                          ),
+                        );
+                      }
                     }
 
                     if (context.mounted) Navigator.pop(context);
