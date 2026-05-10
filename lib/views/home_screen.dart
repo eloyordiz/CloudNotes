@@ -91,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // FUNCIÓN PARA GUARDAR UNA NOTA, DEPENDIENDO DE SI CREAS O EDITAR
+  // PENDIENTE: CAMBIAR EL ESTADO ISSYNCED UNA VEZ SE HA COMPLETADO LA SINCRONIZACIÓN, TANTO AL CREAR COMO AL EDITAR
   Future<void> _saveCurrentNote() async {
     if (_titleController.text.isEmpty && _contentController.text.isEmpty)
       return;
@@ -111,7 +112,10 @@ class _HomeScreenState extends State<HomeScreen> {
         isArchived: _isArchived,
         isSynced: false,
       );
+      // EDITAMOS EN BD LOCAL
       await DatabaseService.instance.updateNote(updatedNote);
+      // GUARDAMOS LA COPIA EN LA NUBE
+      await FirestoreService().saveNoteToCloud(updatedNote);
     } else {
       // CREAR NOTA NUEVA
       final newNote = Note(
@@ -164,17 +168,73 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA
   Future<void> _syncWithCloud() async {
+    '''
+    LA SINCRONIZACIÓN CONSTA DE TRES PARTES:
+
+    PENDIENTE: EN CASO DE TENER DOS VERSIONES DE LA MISMA NOTA EN UNA SINCRONIZACIÓN
+    (UNA EN LOCAL Y OTRA EN LA NUBE), SOBREESCRIBIR LA QUE TENGA UN UPDATEDAT MÁS
+    ANTIGUO, ES DECIR, MANTENER LA VERSIÓN MÁS RECIENTE
+
+    1. SUBIMOS LAS NOTAS Y CATEGORÍAS PENDIENTES A LA NUBE
+      PARA ESTO:
+      - CREAMOS UNA COPIA CON ISSYNCED = TRUE
+      - GUARDAMOS LA COPIA EN LA NUBE
+      - SI SE GUARDA, ACTUALZIAMOS LA BD LOCAL CON ISSYNCED = TRUE
+
+    2. DESCARGAMOS LAS NOTAS Y CATEGORÁIS NUEVAS DE LA NUBE
+
+    3. ACTUALZIAMOS VARIABLE DE ULTIMA SINCRONIZACIÓN Y REFRESCAMOS
+    ''';
     if (uid == null) return;
-
     try {
-      List<Note> cloudNotes = await FirestoreService().getNotesFromCloud(uid!);
+      // 1. SUBIR DATOS PENDIENTES
+      // NOTAS
+      List<Note> unsyncedNotes = await DatabaseService.instance
+          .getUnsyncedNotes(uid!);
+      for (var note in unsyncedNotes) {
+        if (note.isDeleted) {
+          // BORRAR
+          await FirestoreService().deleteNoteFromCloud(uid!, note.id!);
+          await DatabaseService.instance.hardDeleteNote(note.id!);
+        } else {
+          // CREAR/EDITAR
+          final noteToCloud = note.copyWith(isSynced: true);
+          await FirestoreService().saveNoteToCloud(noteToCloud);
+          await DatabaseService.instance.updateNote(noteToCloud);
+        }
+      }
 
-      // ACTUALZIAMOS BD LOCAL
+      //CATEGORÍAS
+      List<NoteCategory> unsyncedCategories = await DatabaseService.instance
+          .getUnsyncedCategories(uid!);
+      for (var category in unsyncedCategories) {
+        if (category.isDeleted) {
+          // BORRAR
+          await FirestoreService().deleteCategoryFromCloud(uid!, category.id!);
+          await DatabaseService.instance.hardDeleteCategory(category.id!);
+        } else {
+          // CREAR/EDITAR
+          final catToCloud = category.copyWith(isSynced: true);
+          await FirestoreService().saveCategoryToCloud(catToCloud);
+          await DatabaseService.instance.updateCategory(catToCloud);
+        }
+      }
+
+      // 2. DESCARGAR DATOS NO GUARDADOS YA EN LOCAL
+      // NOTAS
+      List<Note> cloudNotes = await FirestoreService().getNotesFromCloud(uid!);
       for (var note in cloudNotes) {
         await DatabaseService.instance.createNote(note);
       }
 
-      // ACTUALIZAMOS VARIABLE DE ÚLTIMA SINCRONIZACIÓN
+      // CATEGORÍAS
+      List<NoteCategory> cloudCategories = await FirestoreService()
+          .getCategoriesFromCloud(uid!);
+      for (var category in cloudCategories) {
+        await DatabaseService.instance.createCategory(category);
+      }
+
+      // 3. ACTUALIZAMOS VARIABLE DE ÚLTIMA SINCRONIZACIÓN
       if (mounted) {
         setState(() {
           _lastSyncTime = DateTime.now();
@@ -227,10 +287,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 40),
 
           // LOGO DE LA APP
-          const Text(
-            'LOGO DE LA APP',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
+          Image.asset('assets/logo.png', width: 300, height: 100),
           const SizedBox(height: 20),
 
           // SECCIÓN SUPERIOR
@@ -719,6 +776,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
 
                                 //ARCHIVAR
+                                // PENDIENTE: SINCRONIZAR EL ARCHIVADO CON LA NUBE
                                 TextButton.icon(
                                   onPressed: () async {
                                     if (_selectedNote != null) {
@@ -746,6 +804,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
 
                                 //BORRAR CON CONFIRMACIÓN
+                                //PENDIENTE: MNOSTRAR BOTON DE ELIMINAR SOLO CUANDO NO ESTAMOS CREANDO
                                 TextButton.icon(
                                   onPressed: () async {
                                     final confirm = await showDialog<bool>(
@@ -776,9 +835,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                     );
                                     if (confirm == true &&
                                         _selectedNote?.id != null) {
+                                      //BORRAMOS DE BD LOCAL
                                       await DatabaseService.instance.deleteNote(
                                         _selectedNote!.id!,
                                       );
+                                      //BORRAMOS DE BD NUBE
+                                      await FirestoreService()
+                                          .deleteNoteFromCloud(
+                                            uid!,
+                                            _selectedNote!.id!,
+                                          );
                                       setState(() => _selectedNote = null);
                                       refreshNotes();
                                       if (context.mounted) {

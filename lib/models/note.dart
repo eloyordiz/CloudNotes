@@ -61,8 +61,8 @@ class Note {
     );
   }
 
-  // FUNCIÓN PARA CREAR UNA NOTA NUEVA, CAMBIÁNDOLE EL ID
-  Note copyWith({int? id}) {
+  // FUNCIÓN PARA CREAR UNA NOTA NUEVA
+  Note copyWith({int? id, bool? isSynced}) {
     return Note(
       id: id ?? this.id,
       userId: userId,
@@ -73,7 +73,7 @@ class Note {
       createdAt: createdAt,
       updatedAt: updatedAt,
       isArchived: isArchived,
-      isSynced: isSynced,
+      isSynced: isSynced ?? this.isSynced,
     );
   }
 }

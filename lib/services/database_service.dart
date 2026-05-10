@@ -33,14 +33,14 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 4) {
+    if (oldVersion < 5) {
       await db.execute('DROP TABLE IF EXISTS notes');
       await db.execute('DROP TABLE IF EXISTS categories');
       await _createDB(db, newVersion);
@@ -56,7 +56,8 @@ class DatabaseService {
         name TEXT NOT NULL,
         iconCodePoint INTEGER NOT NULL,
         createdAt TEXT NOT NULL,
-        isSynced INTEGER NOT NULL
+        isSynced INTEGER NOT NULL,
+        isDeleted INTEGER NOT NULL
       )
     ''');
 
@@ -73,6 +74,7 @@ class DatabaseService {
         updatedAt TEXT NOT NULL,
         isArchived INTEGER NOT NULL,
         isSynced INTEGER NOT NULL,
+        isDeleted INTEGER NOT NULL,
         FOREIGN KEY (categoryId) REFERENCES categories (id) ON DELETE SET NULL
       )
     ''');
@@ -96,7 +98,7 @@ class DatabaseService {
     final db = await instance.database;
     final result = await db.query(
       'notes',
-      where: 'userId = ?',
+      where: 'userId = ? AND isDeleted = 0',
       whereArgs: [userId],
       orderBy: 'createdAt DESC',
     );
@@ -115,8 +117,19 @@ class DatabaseService {
     );
   }
 
-  // Función para borrar una nota
+  // Función para borrar una nota (SOFT DELETE)
   Future<int> deleteNote(int id) async {
+    final db = await instance.database;
+    return db.update(
+      'notes',
+      {'isDeleted': 1, 'isSynced': 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Función para borrar una nota (HARD DELETE)
+  Future<int> hardDeleteNote(int id) async {
     final db = await instance.database;
     return await db.delete('notes', where: 'id = ?', whereArgs: [id]);
   }
@@ -139,7 +152,7 @@ class DatabaseService {
     final db = await instance.database;
     final result = await db.query(
       'categories',
-      where: 'userId = ?',
+      where: 'userId = ? AND isDeleted = 0',
       whereArgs: [userId],
       orderBy: 'name ASC',
     );
@@ -157,8 +170,19 @@ class DatabaseService {
     );
   }
 
-  // Función para eliminar las categorías
+  // Función para eliminar las categorías (SOFT DELETE)
   Future<int> deleteCategory(int id) async {
+    final db = await instance.database;
+    return db.update(
+      'categories',
+      {'isDeleted': 1, 'isSynced': 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Función para eliminar las categorías (HARD DELETE)
+  Future<int> hardDeleteCategory(int id) async {
     final db = await instance.database;
     return await db.delete('categories', where: 'id = ?', whereArgs: [id]);
   }
@@ -171,7 +195,6 @@ class DatabaseService {
       'SELECT COUNT(*) FROM notes WHERE categoryId = ?',
       [categoryId],
     );
-    // Extraemos el número del resultado (o devolvemos 0 si algo falla)
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
@@ -186,5 +209,38 @@ class DatabaseService {
     await db.delete('notes');
     await db.delete('categories');
     print("Base de datos local limpiada con éxito");
+  }
+
+  // BUSCAR NOTAS PENDIENTES DE SINCRONIZAR
+  Future<List<Note>> getUnsyncedNotes(String userId) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'notes',
+      where: 'userId = ? AND isSynced = ?',
+      whereArgs: [userId, 0],
+    );
+    return result.map((json) => Note.fromMap(json)).toList();
+  }
+
+  // BUSCAR CATEGORÍAS PENDIENTES DE SINCRONIZAR
+  Future<List<NoteCategory>> getUnsyncedCategories(String userId) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'categories',
+      where: 'userId = ? AND isSynced = ?',
+      whereArgs: [userId, 0],
+    );
+    return result.map((json) => NoteCategory.fromMap(json)).toList();
+  }
+
+  // QUITAR CATEGORÍA A LAS NOTAS HUÉRFANAS
+  Future<void> removeCategoryFromNotes(int categoryId) async {
+    final db = await instance.database;
+    await db.update(
+      'notes',
+      {'categoryId': null, 'isSynced': 0},
+      where: 'categoryId = ?',
+      whereArgs: [categoryId],
+    );
   }
 }

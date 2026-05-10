@@ -101,7 +101,10 @@ class _NoteScreenState extends State<NoteScreen> {
         isArchived: _isArchived,
         isSynced: false,
       );
+      // EN BD LOCAL
       await DatabaseService.instance.updateNote(updatedNote);
+      // EN LA NUBE
+      await FirestoreService().saveNoteToCloud(updatedNote);
     } else {
       // CREAR NOTA
       final newNote = Note(
@@ -171,13 +174,23 @@ class _NoteScreenState extends State<NoteScreen> {
                 );
 
                 if (confirm == true) {
+                  // BORRAMOS DE BD LOCAL
                   await DatabaseService.instance.deleteNote(widget.note!.id!);
+                  //BORRAMOS DE BD NUBE
+                  await FirestoreService().deleteNoteFromCloud(
+                    uid!,
+                    widget.note!.id!,
+                  );
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Nota eliminada')),
+                  );
                   if (mounted) Navigator.pop(context, true);
                 }
               },
             ),
 
           // BOTÓN DE ARCHIVAR
+          // PENDIENTE: SINCRONIZAR EL ARCHIVADO CON LA NUBE
           IconButton(
             icon: Icon(
               _isArchived ? Icons.archive : Icons.archive_outlined,

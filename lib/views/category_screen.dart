@@ -188,7 +188,12 @@ class _CategoryScreenState extends State<CategoryScreen> {
                         createdAt: categoryToEdit.createdAt,
                         isSynced: categoryToEdit.isSynced,
                       );
+                      // EN BD LOCAL
                       await DatabaseService.instance.updateCategory(
+                        updatedCategory,
+                      );
+                      // EN LA NUBE
+                      await FirestoreService().saveCategoryToCloud(
                         updatedCategory,
                       );
                     } else {
@@ -681,10 +686,27 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                               );
                                               if (confirm == true &&
                                                   category.id != null) {
+                                                // BORRAMOS DE BD LOCAL (SOFT)
                                                 await DatabaseService.instance
                                                     .deleteCategory(
                                                       category.id!,
                                                     );
+
+                                                // LA QUITAMOS LA CATEGORÍA A LAS NOTAS HUÉRFANAS
+                                                await DatabaseService.instance
+                                                    .removeCategoryFromNotes(
+                                                      category.id!,
+                                                    );
+
+                                                // BORRAMOS DE BD NUBE
+                                                await FirestoreService()
+                                                    .deleteCategoryFromCloud(
+                                                      uid!,
+                                                      category.id!,
+                                                    );
+
+                                                // PENDIENTE: HABRÍA QUE ACTUALIZAR LAS NOTAS QUE TUVIERAN ESA CATEGORÍA,
+                                                // DE FORMA QUE PASEN A CATEGORÍA NULL
                                                 refreshCategories();
 
                                                 // SNACKBAR INFORMATIVO

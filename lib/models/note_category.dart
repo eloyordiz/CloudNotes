@@ -9,6 +9,7 @@ class NoteCategory {
   final int? iconCodePoint; // icono - Code Point
   final bool isSynced; // estado_sincronizacion
   final DateTime createdAt; // fecha creación
+  final bool isDeleted; // estado_borrado
 
   NoteCategory({
     this.id,
@@ -17,6 +18,7 @@ class NoteCategory {
     required this.iconCodePoint,
     this.isSynced = false,
     required this.createdAt,
+    this.isDeleted = false,
   });
 
   //MAPA PARA CONVERTIR LA CATEGORÍA EN DART A SQLITE
@@ -28,6 +30,7 @@ class NoteCategory {
       'iconCodePoint': iconCodePoint,
       'createdAt': createdAt.toIso8601String(),
       'isSynced': isSynced ? 1 : 0,
+      'isDeleted': isDeleted ? 1 : 0,
     };
   }
 
@@ -42,18 +45,20 @@ class NoteCategory {
           ? DateTime.parse(map['createdAt'] as String)
           : DateTime.now(),
       isSynced: map['isSynced'] == 1,
+      isDeleted: map['isDeleted'] == 1,
     );
   }
 
-  // FUNCIÓN PARA CREAR UNA CATEGORÍA NUEVA, CAMBIÁNDOLE EL ID
-  NoteCategory copyWith({int? id}) {
+  // FUNCIÓN PARA CREAR UNA CATEGORÍA NUEVA
+  NoteCategory copyWith({int? id, bool? isSynced}) {
     return NoteCategory(
       id: id ?? this.id,
       userId: userId,
       name: name,
       iconCodePoint: iconCodePoint,
       createdAt: createdAt,
-      isSynced: isSynced,
+      isSynced: isSynced ?? this.isSynced,
+      isDeleted: isDeleted,
     );
   }
 }
