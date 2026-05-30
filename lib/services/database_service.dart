@@ -243,4 +243,26 @@ class DatabaseService {
       whereArgs: [categoryId],
     );
   }
+
+  // BUSCAR UNA NOTA ESPECÍFICA POR SU ID
+  Future<Note?> getNoteById(int id) async {
+    final db = await instance.database;
+    final maps = await db.query('notes', where: 'id = ?', whereArgs: [id]);
+
+    if (maps.isNotEmpty) {
+      return Note.fromMap(maps.first);
+    }
+    return null;
+  }
+
+  // BUSCAR UNA CATEGORÍA ESPECÍFICA POR SU ID
+  Future<NoteCategory?> getCategoryById(int id) async {
+    final db = await instance.database;
+    final maps = await db.query('categories', where: 'id = ?', whereArgs: [id]);
+
+    if (maps.isNotEmpty) {
+      return NoteCategory.fromMap(maps.first);
+    }
+    return null;
+  }
 }

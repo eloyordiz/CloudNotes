@@ -73,7 +73,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('LOGO DE LA APP'),
+                    Image.asset(
+                      'assets/logo_border.png',
+                      width: 300,
+                      height: 100,
+                    ),
                     const SizedBox(height: 20),
                     const Text(
                       'CloudNotes',
@@ -110,14 +114,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       if (isMobile) ...[
-                        Text(
-                          'LOGO DE LA APP',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue.shade900,
-                          ),
-                        ),
+                        Image.asset('assets/logo.png', width: 300, height: 100),
                         const SizedBox(height: 16),
                         Text(
                           'Bienvenido a CloudNotes',

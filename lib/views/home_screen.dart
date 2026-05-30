@@ -8,8 +8,10 @@ import '../models/note_category.dart';
 import '../services/database_service.dart';
 import '../views/note_screen.dart';
 import '../views/category_screen.dart';
+import '../sync/sync_state.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,8 +21,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late List<Note> notes = [];
-  late List<NoteCategory> categories = [];
+  List<Note> notes = [];
+  List<NoteCategory> categories = [];
   bool isLoading = false;
 
   // VARIABLE DEL USUARIO QUE ESTÁ LOGGEADO
@@ -48,7 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int? _activeCategoryFilter;
 
   // VARIABLE PARA GUARDAR CUÁNDO FUE LA ÚLTIMA SINCRONIZACIÓN
-  DateTime? _lastSyncTime;
+  //DateTime? _lastSyncTime;
 
   // COLORES POSIBLES
   final List<int> _colors = [
@@ -69,35 +71,72 @@ class _HomeScreenState extends State<HomeScreen> {
   //BUSCADOR
   final TextEditingController _searchController = TextEditingController();
 
-  //VARIABLE PARA CONEXIÓN EN TIEMPO REAL CON BD NUBE
+  //VARIABLE PARA COMUNICACIÓN EN TIEMPO REAL CON BD NUBE
   StreamSubscription? _notesSubscription;
+  StreamSubscription? _categoriesSubscription;
+
+  //VARIABLE PARA COMPROBAR LA SINCRONIZACIÓN EN TIEMPO REAL
+  // bool isOnline = false;
+  StreamSubscription<InternetStatus>? _connectionSubscription;
 
   // INICIALIZAMOS LA PRIMERA VEZ QUE ABRIMOS LA PANTALLA
   @override
   void initState() {
     super.initState();
     refreshNotes(); // LEEMOS TODAS LAS NOTAS DE LA BD LOCAL
-    _setupRealtimeSync(); // CARGAMOS LAS NOTAS DE LA BD NUBE
+    _setupRealtimeSync(); // CARGAMOS LAS NOTAS Y CATEGORÁIS DE LA BD NUBE
+    // COMPROBAMOS SI LA SINCRONIZACIÓN ESTÁ ACTIVA
+    _connectionSubscription = InternetConnection().onStatusChange.listen((
+      status,
+    ) {
+      if (mounted) {
+        setState(() {
+          SyncState.isOnline = status == InternetStatus.connected;
+
+          if (SyncState.isOnline) {
+            SyncState.lastSyncTime = DateTime.now();
+          }
+        });
+      }
+      if (SyncState.isOnline) {
+        Future.delayed(const Duration(seconds: 3), () async {
+          if (mounted) {
+            await _syncPendingCats();
+            await _syncPendingNotes();
+            if (mounted) {
+              setState(() {});
+            }
+          }
+        });
+      }
+    });
   }
 
   // Y CERRAMOS TODO CUANDO SE SALE DE LA APP
   @override
   void dispose() {
+    _searchController.dispose();
+    _titleController.dispose();
+    _contentController.dispose();
     _notesSubscription?.cancel();
+    _categoriesSubscription?.cancel();
+    _connectionSubscription?.cancel();
     super.dispose();
   }
 
   // FUNCION PARA SINCRONIZACIÓN EN TIEMPOR EAL
   void _setupRealtimeSync() {
     if (uid == null) return;
-
+    /* 
+    PROCESO PARA NOTAS 
+*/
     _notesSubscription = FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
         .collection('notes')
         .snapshots() // ESTO DETECTA LOS CAMBIOS EN TIEMPO REAL
         .listen((snapshot) async {
-          bool huboCambios = false;
+          bool huboCambiosNotas = false;
 
           // TRAEMOS SOLO LOS DOCUMENTOS EDITADOS, CREADOS O BORRADOS
           for (var change in snapshot.docChanges) {
@@ -106,21 +145,98 @@ class _HomeScreenState extends State<HomeScreen> {
                 change.type == DocumentChangeType.modified) {
               Note notaDeLaNube = Note.fromMap(change.doc.data()!);
 
-              // LA GUARDAMOS EN LA BD LOCAL
-              await DatabaseService.instance.createNote(notaDeLaNube);
-              huboCambios = true;
+              // 1. BUSCAMOS ESA MISMA NOTA EN LA BD LOCAL
+              Note? notaLocal = await DatabaseService.instance.getNoteById(
+                notaDeLaNube.id!,
+              );
+
+              if (notaLocal != null) {
+                // SI LA NOTA DE LA NUBE ES MÁS RECIENTE, SOBREESCRIBIMOS LA LOCAL
+                if (notaDeLaNube.updatedAt.isAfter(notaLocal.updatedAt)) {
+                  await DatabaseService.instance.updateNote(notaDeLaNube);
+                  huboCambiosNotas = true;
+                }
+                // SI LA NOTA DE LA NUBE ES MÁS ANTIGUA, SUBIMOS LA LOCAL A LA NUBE Y NO CAMBIAMOS NADA
+                else if (notaDeLaNube.updatedAt.isBefore(notaLocal.updatedAt)) {
+                  await FirestoreService().saveNoteToCloud(notaLocal);
+                }
+              } else {
+                // SI LA NOTA NO EXISTE (SE CREO DE 0 EN  DISPOSITIVO), LA GUARDAMOS
+                await DatabaseService.instance.createNote(notaDeLaNube);
+                huboCambiosNotas = true;
+              }
             } else if (change.type == DocumentChangeType.removed) {
               // SI ESTAMOS ELIMINANDO
               int? noteId = change.doc.data()?['id'];
               if (noteId != null) {
                 await DatabaseService.instance.deleteNote(noteId);
-                huboCambios = true;
+                huboCambiosNotas = true;
               }
             }
           }
 
           // SI HUBO CAMBIOS, REFRESCAMOS
-          if (huboCambios && mounted) {
+          if (huboCambiosNotas && mounted) {
+            refreshNotes();
+          }
+        });
+    /* 
+    PROCESO PARA CATEGORÍAS 
+*/
+    _categoriesSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('categories')
+        .snapshots() // ESTO DETECTA LOS CAMBIOS EN TIEMPO REAL
+        .listen((snapshot) async {
+          bool huboCambiosCategorias = false;
+
+          // TRAEMOS SOLO LOS DOCUMENTOS EDITADOS, CREADOS O BORRADOS
+          for (var change in snapshot.docChanges) {
+            //SI ESTAMOS CREANDO O EDITANDO
+            if (change.type == DocumentChangeType.added ||
+                change.type == DocumentChangeType.modified) {
+              NoteCategory categoriaDeLaNube = NoteCategory.fromMap(
+                change.doc.data()!,
+              );
+
+              // 1. BUSCAMOS ESA MISMA NOTA EN LA BD LOCAL
+              NoteCategory? catLocal = await DatabaseService.instance
+                  .getCategoryById(categoriaDeLaNube.id!);
+
+              if (catLocal != null) {
+                // SI LA CATEGORIA DE LA NUBE ES MÁS RECIENTE, SOBREESCRIBIMOS LA LOCAL
+                if (categoriaDeLaNube.createdAt.isAfter(catLocal.createdAt)) {
+                  await DatabaseService.instance.updateCategory(
+                    categoriaDeLaNube,
+                  );
+                  huboCambiosCategorias = true;
+                }
+                // SI LA CATEGORIA DE LA NUBE ES MÁS ANTIGUA, SUBIMOS LA LOCAL A LA NUBE Y NO CAMBIAMOS NADA
+                else if (categoriaDeLaNube.createdAt.isBefore(
+                  catLocal.createdAt,
+                )) {
+                  await FirestoreService().saveCategoryToCloud(catLocal);
+                }
+              } else {
+                // SI LA CATEGORIA NO EXISTE (SE CREO DE 0 EN  DISPOSITIVO), LA GUARDAMOS
+                await DatabaseService.instance.createCategory(
+                  categoriaDeLaNube,
+                );
+                huboCambiosCategorias = true;
+              }
+            } else if (change.type == DocumentChangeType.removed) {
+              // SI ESTAMOS ELIMINANDO
+              int? noteId = change.doc.data()?['id'];
+              if (noteId != null) {
+                await DatabaseService.instance.deleteNote(noteId);
+                huboCambiosCategorias = true;
+              }
+            }
+          }
+
+          // SI HUBO CAMBIOS, REFRESCAMOS
+          if (huboCambiosCategorias && mounted) {
             refreshNotes();
           }
         });
@@ -317,13 +433,116 @@ class _HomeScreenState extends State<HomeScreen> {
       // 3. ACTUALIZAMOS VARIABLE DE ÚLTIMA SINCRONIZACIÓN
       if (mounted) {
         setState(() {
-          _lastSyncTime = DateTime.now();
+          SyncState.lastSyncTime = DateTime.now();
         });
       }
       refreshNotes();
     } catch (e) {
       print("Error en auto-sync: $e");
     }
+  }
+
+  // FUNCIÓN PARA SINCRONIZAR ÚNICAMENTE LAS NOTAS PENDIENTES
+  Future<void> _syncPendingNotes() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    // OBTENEMOS NOTAS LOCALES
+    List<Note> localNotes = await DatabaseService.instance.readAllNotes(uid);
+    // FILTRAMOS LAS NO SINCRONIZADAS
+    List<Note> unsyncedNotes = localNotes.where((n) => !n.isSynced).toList();
+
+    if (unsyncedNotes.isEmpty) {
+      if (mounted) {
+        setState(() {
+          SyncState.lastSyncTime = DateTime.now();
+        });
+      }
+    } else {
+      // SUBIMOS LAS NOTAS MEDIANTE UN BUCLE FOR
+      FirestoreService firestore = FirestoreService();
+      for (var note in unsyncedNotes) {
+        try {
+          // CREAMOS UNA COPIA CON SYNCED = TRUE
+          Note syncedNote = note.copyWith(isSynced: true);
+
+          // A LA NUBE
+          await firestore.saveNoteToCloud(syncedNote);
+
+          // A LA BD LOCAL
+          await DatabaseService.instance.updateNote(syncedNote);
+
+          if (_selectedNote != null && _selectedNote!.id == syncedNote.id) {
+            setState(() {
+              _selectedNote = syncedNote;
+            });
+          }
+          SyncState.lastSyncTime = DateTime.now();
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No ha sido posible sincronizar. Compruebe su conexión a internet.',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+    refreshNotes();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('¡Sincronización completada!')),
+    );
+  }
+
+  // FUNCIÓN PARA SINCRONIZAR ÚNICAMENTE LAS CATEGORÍAS PENDIENTES
+  Future<void> _syncPendingCats() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    // OBTENEMOS CATEGORÍAS LOCALES
+    List<NoteCategory> localCats = await DatabaseService.instance
+        .readAllCategories(uid);
+    // FILTRAMOS LAS NO SINCRONIZADAS
+    List<NoteCategory> unsyncedCats = localCats
+        .where((c) => !c.isSynced)
+        .toList();
+
+    if (unsyncedCats.isEmpty) {
+      if (mounted) {
+        setState(() {
+          SyncState.lastSyncTime = DateTime.now();
+        });
+      }
+    } else {
+      // SUBIMOS LAS CATEGORÍAS MEDIANTE UN BUCLE FOR
+      FirestoreService firestore = FirestoreService();
+      for (var category in unsyncedCats) {
+        try {
+          // CREAMOS UNA COPIA CON SYNCED = TRUE
+          NoteCategory syncedCat = category.copyWith(isSynced: true);
+
+          // A LA NUBE
+          await firestore.saveCategoryToCloud(syncedCat);
+
+          // A LA BD LOCAL
+          await DatabaseService.instance.updateCategory(syncedCat);
+
+          SyncState.lastSyncTime = DateTime.now();
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No ha sido posible sincronizar. Compruebe su conexión a internet.',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+    refreshNotes();
   }
 
   @override
@@ -359,229 +578,241 @@ class _HomeScreenState extends State<HomeScreen> {
         - SINCRONIZACIÓN
         - USUARIO
     */
-    final widgetMenuLateral = Container(
-      width: 250, // ANCHO FIJO
+    final widgetMenuLateral = Material(
       color: const Color(0xFFE3F2FD),
-      child: Column(
-        children: [
-          const SizedBox(height: 40),
+      child: SizedBox(
+        width: 250, // ANCHO FIJO
+        child: Column(
+          children: [
+            const SizedBox(height: 40),
 
-          // LOGO DE LA APP
-          Image.asset('assets/logo.png', width: 300, height: 100),
-          const SizedBox(height: 20),
+            // LOGO DE LA APP
+            Image.asset('assets/logo.png', width: 300, height: 100),
+            const SizedBox(height: 20),
 
-          // SECCIÓN SUPERIOR
-          // TODAS LAS NOTAS
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.note_alt, color: Colors.blue),
-                  title: Text(
-                    'Todas mis notas',
-                    style: TextStyle(
-                      fontWeight: _showArchivedOnly
-                          ? FontWeight.normal
-                          : FontWeight.bold,
-                    ),
-                  ),
-                  selected: !_showArchivedOnly,
-                  selectedTileColor: Colors.blue.shade50,
-                  onTap: () {
-                    setState(() {
-                      _showArchivedOnly = false;
-                      _activeCategoryFilter = null;
-                      _selectedNote = null;
-                    });
-                  },
-                ),
-
-                // CATEGORÍAS
-                ExpansionTile(
-                  leading: const Icon(Icons.folder_outlined),
-                  title: const Text('Categorías'),
-                  childrenPadding: const EdgeInsets.only(left: 16),
-                  children: [
-                    ...categories.map((category) {
-                      final isSelected = _activeCategoryFilter == category.id;
-
-                      return ListTile(
-                        leading: Icon(
-                          Icons.label_important_outline,
-                          size: 18,
-                          color: isSelected ? Colors.blue : Colors.grey,
-                        ),
-                        title: Text(
-                          category.name,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: isSelected
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                          ),
-                        ),
-                        selected: isSelected,
-                        selectedTileColor: Colors.blue.shade50,
-                        onTap: () {
-                          setState(() {
-                            _activeCategoryFilter = category.id;
-                            _showArchivedOnly = false;
-                            _selectedNote = null;
-                          });
-                        },
-                      );
-                    }).toList(),
-                    ListTile(
-                      leading: const Icon(Icons.settings_suggest, size: 20),
-                      title: const Text(
-                        'Editar categorías',
-                        style: TextStyle(fontSize: 14),
+            // SECCIÓN SUPERIOR
+            // TODAS LAS NOTAS
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.note_alt, color: Colors.blue),
+                    title: Text(
+                      'Todas mis notas',
+                      style: TextStyle(
+                        fontWeight: _showArchivedOnly
+                            ? FontWeight.normal
+                            : FontWeight.bold,
                       ),
-                      onTap: () async {
-                        //NAVEGAMOS ESPERANDO EL RESULTADO, QUE SERÁ SI VOLVEMOS
-                        //MARCANDO ARCHIVADAS (TRUE) O TODAS MIS NOTAS (FALSE)
-                        final result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const CategoryScreen(),
+                    ),
+                    selected: !_showArchivedOnly,
+                    selectedTileColor: Colors.blue.shade50,
+                    onTap: () {
+                      setState(() {
+                        _showArchivedOnly = false;
+                        _activeCategoryFilter = null;
+                        _selectedNote = null;
+                      });
+                    },
+                  ),
+
+                  // CATEGORÍAS
+                  ExpansionTile(
+                    leading: const Icon(Icons.folder_outlined),
+                    title: const Text('Categorías'),
+                    childrenPadding: const EdgeInsets.only(left: 16),
+                    children: [
+                      ...categories.map((category) {
+                        final isSelected = _activeCategoryFilter == category.id;
+
+                        return Material(
+                          color: isSelected
+                              ? Colors.blue.shade50
+                              : Colors.transparent,
+                          child: ListTile(
+                            leading: Icon(
+                              IconData(
+                                category.iconCodePoint ??
+                                    Icons.label_important_outline.codePoint,
+                                fontFamily: 'MaterialIcons',
+                              ),
+                              size: 18,
+                              color: isSelected ? Colors.blue : Colors.grey,
+                            ),
+                            title: Text(
+                              category.name,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            selected: isSelected,
+                            //selectedTileColor: Colors.blue.shade50,
+                            onTap: () {
+                              setState(() {
+                                _activeCategoryFilter = category.id;
+                                _showArchivedOnly = false;
+                                _selectedNote = null;
+                              });
+                            },
                           ),
                         );
+                      }).toList(),
+                      ListTile(
+                        leading: const Icon(Icons.settings_suggest, size: 20),
+                        title: const Text(
+                          'Editar categorías',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        onTap: () async {
+                          //NAVEGAMOS ESPERANDO EL RESULTADO, QUE SERÁ SI VOLVEMOS
+                          //MARCANDO ARCHIVADAS (TRUE) O TODAS MIS NOTAS (FALSE)
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const CategoryScreen(),
+                            ),
+                          );
 
-                        if (result != null) {
-                          setState(() {
-                            //RESULT = TRUE: ARCHIVADADS
-                            if (result == true) {
-                              _showArchivedOnly = true;
-                              _activeCategoryFilter = null;
-                              _selectedNote = null;
-                              //RESULT = FALSE: TODAS
-                            } else if (result == false) {
-                              _showArchivedOnly = false;
-                              _activeCategoryFilter = null;
-                              _selectedNote = null;
-                            }
-                          });
-                        }
-                        refreshNotes();
-                      },
-                    ),
-                  ],
-                ),
-
-                // ARCHIVADAS
-                ListTile(
-                  leading: const Icon(Icons.archive_outlined),
-                  title: Text(
-                    'Archivadas',
-                    style: TextStyle(
-                      fontWeight: _showArchivedOnly
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
+                          if (result != null) {
+                            setState(() {
+                              //RESULT = TRUE: ARCHIVADADS
+                              if (result == true) {
+                                _showArchivedOnly = true;
+                                _activeCategoryFilter = null;
+                                _selectedNote = null;
+                                //RESULT = FALSE: TODAS
+                              } else if (result == false) {
+                                _showArchivedOnly = false;
+                                _activeCategoryFilter = null;
+                                _selectedNote = null;
+                              }
+                            });
+                          }
+                          refreshNotes();
+                        },
+                      ),
+                    ],
                   ),
-                  selected: _showArchivedOnly,
-                  onTap: () {
-                    setState(() {
-                      _showArchivedOnly = true;
-                      _activeCategoryFilter = null;
-                      _selectedNote = null;
-                    });
-                  },
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
 
-          // SINCRONIZACIÓN
-          // PENDIENTE:
-          //   MOSTRAR CORRECTAMENTE EL ESTADO DE SINCRONIZACIÓN
-          //   MOSTRAR CORRECTAMENTE LA HORA DE ÚLTIMA ACTUALIZACIÓN
-          //   CONFIGURAR PARA QUE, AL HACER CLICK, SE FUERCE LA SINCRONIZACIÓN CON NUBE
-          Container(
-            color: Colors.green.shade50,
-            child: ListTile(
-              leading: const Icon(Icons.cloud_done, color: Colors.green),
-              title: const Text(
-                'Sincronizado',
-                style: TextStyle(
-                  color: Colors.green,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+                  // ARCHIVADAS
+                  ListTile(
+                    leading: const Icon(Icons.archive_outlined),
+                    title: Text(
+                      'Archivadas',
+                      style: TextStyle(
+                        fontWeight: _showArchivedOnly
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    selected: _showArchivedOnly,
+                    onTap: () {
+                      setState(() {
+                        _showArchivedOnly = true;
+                        _activeCategoryFilter = null;
+                        _selectedNote = null;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+
+            // SINCRONIZACIÓN
+            Container(
+              //color: isOnline ? Colors.green.shade50 : Colors.red.shade50,
+              child: ListTile(
+                tileColor: SyncState.isOnline
+                    ? Colors.green.shade50
+                    : Colors.red.shade50,
+                leading: Icon(
+                  SyncState.isOnline ? Icons.cloud_done : Icons.cloud_off,
+                  color: SyncState.isOnline ? Colors.green : Colors.red,
                 ),
+                title: Text(
+                  SyncState.isOnline ? 'Sincronizado' : 'Sin conexión',
+                  style: TextStyle(
+                    color: SyncState.isOnline ? Colors.green : Colors.red,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                subtitle: Text(
+                  SyncState.lastSyncTime == null
+                      ? 'Sincronizando con la nube...'
+                      : 'Última vez: ${SyncState.lastSyncTime!.day}/${SyncState.lastSyncTime!.month} a las ${SyncState.lastSyncTime!.hour}:${SyncState.lastSyncTime!.minute.toString().padLeft(2, '0')}',
+                  style: TextStyle(
+                    color: SyncState.isOnline ? Colors.green : Colors.red,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: SyncState.isOnline
+                    ? () async {
+                        await _syncPendingCats();
+                        await _syncPendingNotes();
+                      }
+                    : null,
+              ),
+            ),
+
+            const Divider(height: 1),
+
+            // USUARIO
+            ListTile(
+              leading: const CircleAvatar(
+                radius: 16,
+                backgroundColor: Colors.blueAccent,
+                child: Icon(Icons.person, color: Colors.white, size: 18),
+              ),
+              title: Text(
+                (currentUser?.displayName?.isEmpty ?? true)
+                    ? 'Usuario'
+                    : currentUser!.displayName!,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
               subtitle: Text(
-                _lastSyncTime == null
-                    ? 'Sincronizando con la nube...'
-                    : 'Última vez: ${_lastSyncTime!}',
-                style: const TextStyle(color: Colors.green, fontSize: 12),
+                currentUser?.email ?? 'Email',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+                overflow: TextOverflow.ellipsis,
               ),
-              onTap: () async {
-                final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-                // OBTENEMOS NOTAS LOCALES
-                List<Note> localNotes = await DatabaseService.instance
-                    .readAllNotes(uid);
-
-                // SUBIMOS LAS NOTAS MEDIANTE UN BUCLE FOR
-                FirestoreService firestore = FirestoreService();
-                for (var note in localNotes) {
-                  await firestore.saveNoteToCloud(note);
-                }
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('¡Sincronización completada!')),
-                );
-              },
             ),
-          ),
 
-          const Divider(height: 1),
-
-          // USUARIO
-          ListTile(
-            leading: const CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.blueAccent,
-              child: Icon(Icons.person, color: Colors.white, size: 18),
-            ),
-            title: Text(
-              currentUser?.displayName ?? 'Usuario',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(
-              currentUser?.email ?? 'Email',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ),
-
-          // BOTÓN DE CERRAR SESIÓN
-          SizedBox(
-            width: double.infinity,
-            child: TextButton.icon(
-              onPressed: () async {
-                await AuthService().signOut();
-              },
-              icon: const Icon(Icons.logout, size: 18, color: Colors.black87),
-              label: const Text(
-                'Cerrar sesión',
-                style: TextStyle(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w500,
+            // BOTÓN DE CERRAR SESIÓN
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: () async {
+                  await AuthService().signOut();
+                },
+                icon: const Icon(Icons.logout, size: 18, color: Colors.black87),
+                label: const Text(
+                  'Cerrar sesión',
+                  style: TextStyle(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-              style: TextButton.styleFrom(
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                style: TextButton.styleFrom(
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-        ],
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
 
@@ -684,6 +915,12 @@ class _HomeScreenState extends State<HomeScreen> {
                               _searchQuery.isEmpty
                                   ? "No hay ninguna nota guardada. Pulse 'Nueva nota' para crear una."
                                   : "No se encontraron notas con '$_searchQuery'.",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 16,
+                                height: 1.5,
+                              ),
                             ),
                           )
                         : ListView.builder(
@@ -692,6 +929,16 @@ class _HomeScreenState extends State<HomeScreen> {
                             itemBuilder: (context, index) {
                               final note = filteredNotes[index];
                               final isSelected = _selectedNote?.id == note.id;
+
+                              String? categoryName;
+                              if (note.categoryId != null) {
+                                final catIndex = categories.indexWhere(
+                                  (c) => c.id == note.categoryId,
+                                );
+                                if (catIndex != -1) {
+                                  categoryName = categories[catIndex].name;
+                                }
+                              }
 
                               return Dismissible(
                                 //DISMISSIBLE PERMITE DESLIZAR PARA BORRAR
@@ -761,23 +1008,124 @@ class _HomeScreenState extends State<HomeScreen> {
                                       horizontal: 16,
                                       vertical: 4,
                                     ),
+                                    //TÍTULO
                                     title: Text(
                                       note.title,
                                       style: const TextStyle(
                                         fontWeight: FontWeight.bold,
                                       ),
-                                    ), //TÍTULO
-
+                                    ),
+                                    //SUBTÍTULO: CONTENIDO Y CARACTERÍSTICAS: CATEGORÍA Y SINCRONIZACIÓN
                                     subtitle: Padding(
                                       padding: const EdgeInsets.only(top: 4.0),
-                                      child: Text(
-                                        //CONTENIDO
-                                        note.content,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: Colors.grey.shade700,
-                                        ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            //1. CONTENIDO
+                                            note.content,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: Colors.grey.shade700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          // 2. CARACTERÍSTICAS (CATEGORÍA Y SINCRONIZACIÓN)
+                                          Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              // CATEGORÍA
+                                              if (categoryName != null)
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 4,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.black
+                                                        .withValues(
+                                                          alpha: 0.06,
+                                                        ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          6,
+                                                        ),
+                                                  ),
+                                                  child: Text(
+                                                    categoryName,
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      color: Colors.black87,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                )
+                                              else
+                                                const SizedBox(),
+                                              // SINCRONIZACIÓN
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 4,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: note.isSynced
+                                                      ? Colors.green.shade100
+                                                            .withValues(
+                                                              alpha: 0.5,
+                                                            )
+                                                      : Colors.red.shade100
+                                                            .withValues(
+                                                              alpha: 0.5,
+                                                            ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      note.isSynced
+                                                          ? Icons.cloud_done
+                                                          : Icons.cloud_off,
+                                                      size: 12,
+                                                      color: note.isSynced
+                                                          ? Colors
+                                                                .green
+                                                                .shade700
+                                                          : Colors.red.shade700,
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      note.isSynced
+                                                          ? 'Sincronizado'
+                                                          : 'No sincronizado',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        color: note.isSynced
+                                                            ? Colors
+                                                                  .green
+                                                                  .shade800
+                                                            : Colors
+                                                                  .red
+                                                                  .shade800,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
                                       ),
                                     ),
                                     onTap: () {
@@ -836,15 +1184,25 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Row(
                               children: [
                                 //SINCRONIZACIÓN
-                                const Icon(
-                                  Icons.cloud_done,
-                                  color: Colors.green,
+                                Icon(
+                                  _selectedNote?.isSynced ?? false
+                                      ? Icons.cloud_done
+                                      : Icons.cloud_off,
+                                  color: _selectedNote?.isSynced ?? false
+                                      ? Colors.green
+                                      : Colors.red,
                                   size: 20,
                                 ),
                                 const SizedBox(width: 8),
-                                const Text(
-                                  'Sincronizado',
-                                  style: TextStyle(color: Colors.green),
+                                Text(
+                                  _selectedNote?.isSynced ?? false
+                                      ? 'Sincronizado'
+                                      : 'No sincronizado',
+                                  style: TextStyle(
+                                    color: _selectedNote?.isSynced ?? false
+                                        ? Colors.green
+                                        : Colors.red,
+                                  ),
                                 ),
                                 const Spacer(),
 
@@ -857,99 +1215,102 @@ class _HomeScreenState extends State<HomeScreen> {
 
                                 //ARCHIVAR
                                 // PENDIENTE: SINCRONIZAR EL ARCHIVADO CON LA NUBE
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    if (_selectedNote != null) {
-                                      setState(() {
-                                        _isArchived = !_isArchived;
-                                      });
-                                      await _saveCurrentNote();
-                                      setState(() {
-                                        _selectedNote = null;
-                                      });
-                                    }
-                                  },
-                                  icon: Icon(
-                                    _isArchived
-                                        ? Icons.unarchive
-                                        : Icons.archive_outlined,
-                                    color: _isArchived ? Colors.orange : null,
-                                  ),
-                                  label: Text(
-                                    _isArchived ? 'Desarchivar' : 'Archivar',
-                                    style: TextStyle(
+                                if (_selectedNote?.id != null)
+                                  TextButton.icon(
+                                    onPressed: () async {
+                                      if (_selectedNote != null) {
+                                        setState(() {
+                                          _isArchived = !_isArchived;
+                                        });
+                                        await _saveCurrentNote();
+                                        setState(() {
+                                          _selectedNote = null;
+                                        });
+                                      }
+                                    },
+                                    icon: Icon(
+                                      _isArchived
+                                          ? Icons.unarchive
+                                          : Icons.archive_outlined,
                                       color: _isArchived ? Colors.orange : null,
                                     ),
-                                  ),
-                                ),
-
-                                //BORRAR CON CONFIRMACIÓN
-                                //PENDIENTE: MNOSTRAR BOTON DE ELIMINAR SOLO CUANDO NO ESTAMOS CREANDO
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    final confirm = await showDialog<bool>(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        title: const Text('¿Eliminar nota?'),
-                                        content: const Text(
-                                          '¿Estás seguro de que deseas eliminar la nota? Esta acción no se puede deshacer y la nota desaparecerá para siempre.',
-                                        ),
-                                        actions: [
-                                          // BOTÓN CANCELAR
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(context, false),
-                                            child: const Text('Cancelar'),
-                                          ),
-                                          // BOTÓN ELIMINAR
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(context, true),
-                                            style: TextButton.styleFrom(
-                                              foregroundColor: Colors.red,
-                                            ),
-                                            child: const Text('Eliminar'),
-                                          ),
-                                        ],
+                                    label: Text(
+                                      _isArchived ? 'Desarchivar' : 'Archivar',
+                                      style: TextStyle(
+                                        color: _isArchived
+                                            ? Colors.orange
+                                            : null,
                                       ),
-                                    );
-                                    if (confirm == true &&
-                                        _selectedNote?.id != null) {
-                                      //BORRAMOS DE BD LOCAL
-                                      await DatabaseService.instance.deleteNote(
-                                        _selectedNote!.id!,
-                                      );
-                                      //BORRAMOS DE BD NUBE
-                                      await FirestoreService()
-                                          .deleteNoteFromCloud(
-                                            uid!,
-                                            _selectedNote!.id!,
-                                          );
-                                      setState(() => _selectedNote = null);
-                                      refreshNotes();
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              'Nota eliminada correctamente',
-                                            ),
-                                            backgroundColor: Colors.black87,
+                                    ),
+                                  ),
+
+                                //BORRAR CON CONFIRMACIÓN (SÓLO VISIBLE SI ESTAMOS EDITANDO)
+                                if (_selectedNote?.id != null)
+                                  TextButton.icon(
+                                    onPressed: () async {
+                                      final confirm = await showDialog<bool>(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title: const Text('¿Eliminar nota?'),
+                                          content: const Text(
+                                            '¿Estás seguro de que deseas eliminar la nota? Esta acción no se puede deshacer y la nota desaparecerá para siempre.',
                                           ),
-                                        );
+                                          actions: [
+                                            // BOTÓN CANCELAR
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, false),
+                                              child: const Text('Cancelar'),
+                                            ),
+
+                                            // BOTÓN ELIMINAR
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, true),
+                                              style: TextButton.styleFrom(
+                                                foregroundColor: Colors.red,
+                                              ),
+                                              child: const Text('Eliminar'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      if (confirm == true &&
+                                          _selectedNote?.id != null) {
+                                        //BORRAMOS DE BD LOCAL
+                                        await DatabaseService.instance
+                                            .deleteNote(_selectedNote!.id!);
+                                        //BORRAMOS DE BD NUBE
+                                        await FirestoreService()
+                                            .deleteNoteFromCloud(
+                                              uid!,
+                                              _selectedNote!.id!,
+                                            );
+                                        setState(() => _selectedNote = null);
+                                        refreshNotes();
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Nota eliminada correctamente',
+                                              ),
+                                              backgroundColor: Colors.black87,
+                                            ),
+                                          );
+                                        }
                                       }
-                                    }
-                                  },
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    color: Colors.red,
+                                    },
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.red,
+                                    ),
+                                    label: const Text(
+                                      'Eliminar',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
                                   ),
-                                  label: const Text(
-                                    'Eliminar',
-                                    style: TextStyle(color: Colors.red),
-                                  ),
-                                ),
                               ],
                             ),
                           ),

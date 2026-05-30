@@ -1,9 +1,13 @@
 import 'package:cloud_notes/services/auth_service.dart';
 import 'package:cloud_notes/services/firestore_service.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_notes/models/note.dart';
 import '../models/note_category.dart';
 import '../services/database_service.dart';
+import '../sync/sync_state.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
+import 'dart:async';
 
 class CategoryScreen extends StatefulWidget {
   const CategoryScreen({super.key});
@@ -26,13 +30,16 @@ class _CategoryScreenState extends State<CategoryScreen> {
   NoteCategory? _selectedCategory;
   bool _isCreating = false;
 
-  // CONTROLADORES PARA EL FORMULARIO
-  final TextEditingController _nameController = TextEditingController();
-  IconData? _selectedIcon;
-
   // VARIABLES DEL BUSCADOR
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+
+  //VARIABLE PARA COMPROBAR LA SINCRONIZACIÓN EN TIEMPO REAL
+  // bool isOnline = false;
+  StreamSubscription<InternetStatus>? _connectionSubscription;
+
+  // VARIABLE PARA GUARDAR CUÁNDO FUE LA ÚLTIMA SINCRONIZACIÓN
+  // DateTime? _lastSyncTime;
 
   // LISTA DE ICONOS POSIBLES PARA ELEGIR (AMPLIAR)
   final List<IconData> _availableIcons = [
@@ -59,6 +66,27 @@ class _CategoryScreenState extends State<CategoryScreen> {
   void initState() {
     super.initState();
     refreshCategories(); // LEEMOS TODAS LAS CATEGORÍAS DE LA BD
+
+    // COMPROBAMOS SI LA SINCRONIZACIÓN ESTÁ ACTIVA
+    _connectionSubscription = InternetConnection().onStatusChange.listen((
+      status,
+    ) {
+      setState(() {
+        SyncState.isOnline = status != InternetStatus.disconnected;
+
+        if (SyncState.isOnline) {
+          SyncState.lastSyncTime = DateTime.now();
+        }
+      });
+      if (SyncState.isOnline == true) {
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) {
+            _syncPendingCats();
+            _syncPendingNotes();
+          }
+        });
+      }
+    });
   }
 
   // FUNCIÓN PARA LEER LA BD
@@ -175,8 +203,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
                 // BOTÓN GUARDAR / ACTUALZIZAR
                 ElevatedButton(
                   onPressed: () async {
-                    if (nameController.text.isEmpty)
+                    if (nameController.text.isEmpty) {
                       return; // EVITAMOS CATEGORÍAS SIN NOMBRE
+                    }
 
                     if (isEditing) {
                       // ACTUALIZAR CATEGORÍA EN LA BD
@@ -207,7 +236,6 @@ class _CategoryScreenState extends State<CategoryScreen> {
                           categoriaConId,
                         );
                       } catch (e) {
-                        print("Guardado offline: $e");
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text(
@@ -244,7 +272,6 @@ class _CategoryScreenState extends State<CategoryScreen> {
                         );
                         setState(() => _isCreating = false);
                       } catch (e) {
-                        print("Guardado offline: $e");
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Sin conexión. Guardada en local.'),
@@ -264,6 +291,109 @@ class _CategoryScreenState extends State<CategoryScreen> {
         );
       },
     );
+  }
+
+  // FUNCIÓN PARA SINCRONIZAR ÚNICAMENTE LAS CATEGORÍAS PENDIENTES
+  Future<void> _syncPendingCats() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    // OBTENEMOS CATEGORÍAS LOCALES
+    List<NoteCategory> localCats = await DatabaseService.instance
+        .readAllCategories(uid);
+    // FILTRAMOS LAS NO SINCRONIZADAS
+    List<NoteCategory> unsyncedCats = localCats
+        .where((c) => !c.isSynced)
+        .toList();
+
+    if (unsyncedCats.isEmpty) {
+      if (mounted) {
+        setState(() {
+          SyncState.lastSyncTime = DateTime.now();
+        });
+      }
+    } else {
+      // SUBIMOS LAS CATEGORÍAS MEDIANTE UN BUCLE FOR
+      FirestoreService firestore = FirestoreService();
+      for (var category in unsyncedCats) {
+        try {
+          // CREAMOS UNA COPIA CON SYNCED = TRUE
+          NoteCategory syncedCat = category.copyWith(isSynced: true);
+
+          // A LA NUBE
+          await firestore.saveCategoryToCloud(syncedCat);
+
+          // A LA BD LOCAL
+          await DatabaseService.instance.updateCategory(syncedCat);
+
+          if (_selectedCategory != null &&
+              _selectedCategory!.id == syncedCat.id) {
+            setState(() {
+              _selectedCategory = syncedCat;
+            });
+          }
+          SyncState.lastSyncTime = DateTime.now();
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No ha sido posible sincronizar. Compruebe su conexión a internet.',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+    refreshCategories();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('¡Sincronización completada!')),
+    );
+  }
+
+  // FUNCIÓN PARA SINCRONIZAR ÚNICAMENTE LAS NOTAS PENDIENTES
+  Future<void> _syncPendingNotes() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    // OBTENEMOS NOTAS LOCALES
+    List<Note> localNotes = await DatabaseService.instance.readAllNotes(uid);
+    // FILTRAMOS LAS NO SINCRONIZADAS
+    List<Note> unsyncedNotes = localNotes.where((n) => !n.isSynced).toList();
+
+    if (unsyncedNotes.isEmpty) {
+      if (mounted) {
+        setState(() {
+          SyncState.lastSyncTime = DateTime.now();
+        });
+      }
+    } else {
+      // SUBIMOS LAS NOTAS MEDIANTE UN BUCLE FOR
+      FirestoreService firestore = FirestoreService();
+      for (var note in unsyncedNotes) {
+        try {
+          // CREAMOS UNA COPIA CON SYNCED = TRUE
+          Note syncedNote = note.copyWith(isSynced: true);
+
+          // A LA NUBE
+          await firestore.saveNoteToCloud(syncedNote);
+
+          // A LA BD LOCAL
+          await DatabaseService.instance.updateNote(syncedNote);
+
+          SyncState.lastSyncTime = DateTime.now();
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No ha sido posible sincronizar. Compruebe su conexión a internet.',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 
   @override
@@ -287,139 +417,156 @@ class _CategoryScreenState extends State<CategoryScreen> {
         - SINCRONIZACIÓN
         - USUARIO
     */
-    final widgetMenuLateral = Container(
-      width: 250,
+    final widgetMenuLateral = Material(
       color: const Color(0xFFE3F2FD),
-      child: Column(
-        children: [
-          const SizedBox(height: 40),
-          const Text(
-            'LOGO DE LA APP',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 20),
+      child: SizedBox(
+        width: 250,
+        child: Column(
+          children: [
+            const SizedBox(height: 40),
 
-          // SECCIÓN SUPERIOR
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                // TODAS LAS NOTAS
-                ListTile(
-                  leading: const Icon(Icons.note_alt, color: Colors.grey),
-                  title: const Text('Todas mis notas'),
-                  onTap: () {
-                    if (isMobile) Navigator.pop(context);
-                    Navigator.pop(
-                      context,
-                      false,
-                    ); //PARÁMETRO = VER ARCHIVADAS ?
-                  },
-                ),
+            //LOGO DE LA APP
+            Image.asset('assets/logo.png', width: 300, height: 100),
+            const SizedBox(height: 20),
 
-                // CATEGORÍAS
-                ListTile(
-                  leading: const Icon(Icons.folder, color: Colors.blue),
-                  title: const Text(
-                    'Categorías',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+            // SECCIÓN SUPERIOR
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  // TODAS LAS NOTAS
+                  ListTile(
+                    leading: const Icon(Icons.note_alt, color: Colors.grey),
+                    title: const Text('Todas mis notas'),
+                    onTap: () {
+                      if (isMobile) Navigator.pop(context);
+                      Navigator.pop(
+                        context,
+                        false,
+                      ); //PARÁMETRO = VER ARCHIVADAS ?
+                    },
                   ),
-                  selected: true,
-                  selectedTileColor: Colors.blue.shade50,
-                  onTap: () {},
-                ),
 
-                // ARCHIVADAS
-                ListTile(
-                  leading: const Icon(
-                    Icons.archive_outlined,
-                    color: Colors.grey,
+                  // CATEGORÍAS
+                  ListTile(
+                    leading: const Icon(Icons.folder, color: Colors.blue),
+                    title: const Text(
+                      'Categorías',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    selected: true,
+                    selectedTileColor: Colors.blue.shade50,
+                    onTap: () {},
                   ),
-                  title: const Text('Archivadas'),
-                  onTap: () {
-                    if (isMobile) Navigator.pop(context);
-                    Navigator.pop(
-                      context,
-                      true, //PARÁMETRO = VER ARCHIVADAS ?
-                    );
-                  },
-                ),
-              ],
+
+                  // ARCHIVADAS
+                  ListTile(
+                    leading: const Icon(
+                      Icons.archive_outlined,
+                      color: Colors.grey,
+                    ),
+                    title: const Text('Archivadas'),
+                    onTap: () {
+                      if (isMobile) Navigator.pop(context);
+                      Navigator.pop(
+                        context,
+                        true, //PARÁMETRO = VER ARCHIVADAS ?
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Divider(height: 1),
+            const Divider(height: 1),
 
-          // SINCRONIZACIÓN
-          // PENDIENTE:
-          //   MOSTRAR CORRECTAMENTE EL ESTADO DE SINCRONIZACIÓN
-          //   MOSTRAR CORRECTAMENTE LA HORA DE ÚLTIMA ACTUALIZACIÓN
-          //   CONFIGURAR PARA QUE, AL HACER CLICK, SE FUERCE LA SINCRONIZACIÓN CON NUBE
-          Container(
-            color: Colors.green.shade50,
-            child: ListTile(
-              leading: const Icon(Icons.cloud_done, color: Colors.green),
-              title: const Text(
-                'Sincronizado',
-                style: TextStyle(
-                  color: Colors.green,
+            // SINCRONIZACIÓN
+            Container(
+              child: ListTile(
+                tileColor: SyncState.isOnline
+                    ? Colors.green.shade50
+                    : Colors.red.shade50,
+                leading: Icon(
+                  SyncState.isOnline ? Icons.cloud_done : Icons.cloud_off,
+                  color: SyncState.isOnline ? Colors.green : Colors.red,
+                ),
+                title: Text(
+                  SyncState.isOnline ? 'Sincronizado' : 'Sin conexión',
+                  style: TextStyle(
+                    color: SyncState.isOnline ? Colors.green : Colors.red,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                subtitle: Text(
+                  SyncState.lastSyncTime == null
+                      ? 'Sincronizando con la nube...'
+                      : 'Última vez: ${SyncState.lastSyncTime!.day}/${SyncState.lastSyncTime!.month} a las ${SyncState.lastSyncTime!.hour}:${SyncState.lastSyncTime!.minute.toString().padLeft(2, '0')}',
+                  style: TextStyle(
+                    color: SyncState.isOnline ? Colors.green : Colors.red,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: SyncState.isOnline
+                    ? () async {
+                        _syncPendingCats();
+                        _syncPendingNotes();
+                      }
+                    : null,
+              ),
+            ),
+
+            const Divider(height: 1),
+
+            // USUARIO
+            ListTile(
+              leading: const CircleAvatar(
+                radius: 16,
+                backgroundColor: Colors.blueAccent,
+                child: Icon(Icons.person, color: Colors.white, size: 18),
+              ),
+              title: Text(
+                (currentUser?.displayName?.isEmpty ?? true)
+                    ? 'Usuario'
+                    : currentUser!.displayName!,
+                style: const TextStyle(
+                  fontSize: 13,
                   fontWeight: FontWeight.bold,
-                  fontSize: 14,
                 ),
+                overflow: TextOverflow.ellipsis,
               ),
-              subtitle: const Text(
-                'Última sincronización: hace 4 min.',
-                style: TextStyle(color: Colors.green, fontSize: 12),
+              subtitle: Text(
+                currentUser?.email ?? 'Email',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
-              onTap: () {},
             ),
-          ),
 
-          const Divider(height: 1),
-
-          // USUARIO
-          ListTile(
-            leading: const CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.blueAccent,
-              child: Icon(Icons.person, color: Colors.white, size: 18),
-            ),
-            title: Text(
-              currentUser?.displayName ?? 'Usuario',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(
-              currentUser?.email ?? 'Email',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ),
-
-          // BOTÓN DE CERRAR SESIÓN
-          SizedBox(
-            width: double.infinity,
-            child: TextButton.icon(
-              onPressed: () async {
-                await AuthService().signOut();
-              },
-              icon: const Icon(Icons.logout, size: 18, color: Colors.black87),
-              label: const Text(
-                'Cerrar sesión',
-                style: TextStyle(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w500,
+            // BOTÓN DE CERRAR SESIÓN
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: () async {
+                  await AuthService().signOut();
+                },
+                icon: const Icon(Icons.logout, size: 18, color: Colors.black87),
+                label: const Text(
+                  'Cerrar sesión',
+                  style: TextStyle(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-              style: TextButton.styleFrom(
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                style: TextButton.styleFrom(
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-        ],
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
 

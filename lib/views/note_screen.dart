@@ -331,7 +331,10 @@ class _NoteScreenState extends State<NoteScreen> {
                 Expanded(
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<int?>(
-                      value: _selectedCategoryId,
+                      value:
+                          categories.any((cat) => cat.id == _selectedCategoryId)
+                          ? _selectedCategoryId
+                          : null,
                       isExpanded: true,
                       hint: const Text(
                         'Sin categoría',
