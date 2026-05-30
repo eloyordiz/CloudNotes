@@ -1,0 +1,31 @@
+name: Compilar App para Windows
+
+on:
+  push:
+    branches: [ main, master ] # Se ejecutará cada vez que subas cambios a main o master
+  workflow_dispatch: # Esto te permite activar la compilación manualmente desde la web
+
+jobs:
+  build:
+    runs-on: windows-latest # Aquí es donde ocurre la magia: un Windows virtual con todo lo necesario
+
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar el entorno de Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Descargar dependencias del proyecto
+        run: flutter pub get
+
+      - name: Compilar ejecutable de Windows
+        run: flutter build windows
+
+      - name: Guardar el archivo comprimido (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudNotes-Windows-App
+          path: build/windows/x64/runner/Release/
